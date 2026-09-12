@@ -22,14 +22,16 @@ You can also create a Web Service manually: **Node**, build `npm install`, start
 `NODE_VERSION=20`, set `ADMIN_PASSWORD` yourself. Render still injects `PORT`; the app already
 listens on `process.env.PORT || 3847` and `0.0.0.0`.
 
-### Free tier notes
+### Paid Starter + persistent disk (default Blueprint)
 
-- **Sleep:** free instances sleep after idle traffic. The first request after sleep can take ~30–60s.
-- **Disk is ephemeral:** SQLite (`data/shop.db`) and `uploads/` live on the instance filesystem.
-  A **redeploy, restart, or recycle can wipe products, orders, slips, and custom images**.
-  Seed products are recreated automatically if the DB is empty on boot.
-- For lasting data, use a paid instance + [persistent disk](https://render.com/docs/disks), or an
-  external database / object storage.
+Blueprint uses **Starter** (~$7/mo) + a **1GB disk** (~$0.25/GB-mo) so the service stays **always-on**
+(no free-tier spin-down) and shop data survives restarts.
+
+- Data lives under **`DATA_ROOT=/var/data`** → `data/shop.db` and `uploads/` on the mounted disk.
+- A **payment method** is required on Render for Starter + disks.
+- After you push these changes: **sync the Blueprint**, **or** manually set **Instance Type → Starter**,
+  **Add Disk** mount `/var/data` size **1GB**, env **`DATA_ROOT=/var/data`**, then **redeploy**.
+- Seed products still appear automatically if the DB is empty on boot.
 
 ### After first login
 
@@ -55,13 +57,16 @@ Redeploy၊ sleep/wake၊ git push လုပ်လည်း **hostname မပြ
 `NODE_VERSION=20`, `ADMIN_PASSWORD` ကိုယ်တိုင်သတ်မှတ်ပါ။ Render က `PORT` ထည့်ပေးပြီး
 အက်ပ်က `process.env.PORT || 3847` နှင့် `0.0.0.0` တွင် နားထောင်ပြီးသားဖြစ်သည်။
 
-### Free tier မှတ်ချက်
+### Paid Starter + persistent disk (Blueprint ပုံသေ)
 
-- **Sleep:** အသုံးမပြုသည့်အခါ instance အိပ်သွားနိုင်သည်။ နိုးလာချိန် ပထမ request နှောင့်နှေးနိုင် (~30–60 စက္ကန့်)။
-- **Disk ယာယီ:** SQLite (`data/shop.db`) နှင့် `uploads/` သည် instance disk ပေါ်တွင်သာရှိသည်။
-  **Redeploy / restart တွင် ပစ္စည်း၊ အော်ဒါ၊ စလစ်၊ ပုံများ ပျောက်နိုင်သည်။**
-  DB ဗလာဖြစ်ပါက seed ပစ္စည်းများ boot တွင် အလိုအလျောက် ပြန်ထည့်သည်။
-- ဒေတာထိန်းချင်လျှင် paid instance + persistent disk သို့မဟုတ် ပြင်ပ database / storage သုံးပါ။
+Blueprint သည် **Starter** (~$7/mo) + **1GB disk** (~$0.25/GB-mo) သုံးသည် — instance **အမြဲဖွင့်**
+(free tier spin-down မရှိ)၊ restart ပြီးနောက် ဆိုင်ဒေတာ မပျောက်။
+
+- ဒေတာသည် **`DATA_ROOT=/var/data`** အောက်တွင် (`data/shop.db`, `uploads/`)။
+- Render တွင် **payment method** လိုအပ်သည်။
+- Push ပြီးနောက်: Blueprint **sync** လုပ်ပါ၊ သို့မဟုတ် ကိုယ်တိုင် **Instance Type → Starter**,
+  **Add Disk** mount `/var/data` size **1GB**, env **`DATA_ROOT=/var/data`** သတ်မှတ်ပြီး **redeploy**။
+- DB ဗလာဖြစ်ပါက seed ပစ္စည်းများ boot တွင် အလိုအလျောက် ပြန်ထည့်သည်။
 
 ### ပထမဝင်ပြီးနောက်
 

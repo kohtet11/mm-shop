@@ -4,12 +4,18 @@ services:
   - type: web
     name: mm-shop
     runtime: node
-    plan: free
+    plan: starter
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /
+    disk:
+      name: mm-shop-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: ADMIN_PASSWORD
         generateValue: true
       - key: NODE_VERSION
         value: "20"
+      - key: DATA_ROOT
+        value: /var/data

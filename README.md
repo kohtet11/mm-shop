@@ -32,6 +32,7 @@ cp .env.example .env
 |----------|---------|-----------|
 | `ADMIN_PASSWORD` | `admin123` | Admin စကားဝှက် |
 | `PORT` | `3847` | ဆာဗာ port |
+| `DATA_ROOT` | `__dirname` (သို့ `/var/data` ရှိလျှင်) | SQLite + uploads အမြစ်လမ်းကြောင်း |
 
 ## Admin အသုံးပြုပုံ (အကျဉ်း)
 
@@ -53,11 +54,17 @@ cp .env.example .env
 ```
 mm-shop/
   server.js          # Express API + static
-  data/shop.db       # SQLite
+  data/shop.db       # SQLite (local; on Render under DATA_ROOT)
   uploads/products/  # ပစ္စည်းပုံများ
   uploads/slips/     # ငွေလွှဲစလစ်များ
   public/            # စတိုး + admin UI
 ```
+
+## Deploy (Render)
+
+See **[DEPLOY.md](DEPLOY.md)**. Blueprint default: **Starter** (~$7/mo) + **1GB disk** (~$0.25/GB-mo),
+always-on, data under `/var/data` via `DATA_ROOT`. Needs a payment method on Render. After push,
+sync Blueprint or manually set Starter + disk mount `/var/data` + `DATA_ROOT=/var/data`, then redeploy.
 
 ## API အကျဉ်း
 
@@ -68,3 +75,4 @@ mm-shop/
 
 - `better-sqlite3` native build မအောင်မြင်ပါက `sql.js` ကို fallback အဖြစ် ထည့်သွင်းနိုင်သည် (`npm install sql.js`)
 - Seed ပစ္စည်း ၃ ခု (Skullpanda, Nommi, Zootopia) ပထမအကြိမ် စတင်ချိန်တွင် အလိုအလျောက် ထည့်သည်
+- `DATA_ROOT` သတ်မှတ်ပါက `data/` နှင့် `uploads/` သည် ထိုလမ်းကြောင်းအောက်တွင် ရှိသည် (Render disk: `/var/data`)

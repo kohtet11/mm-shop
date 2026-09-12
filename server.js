@@ -12,8 +12,9 @@ const { v4: uuidv4 } = require('uuid');
 const PORT = Number(process.env.PORT) || 3847;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 const ROOT = __dirname;
-const DATA_DIR = path.join(ROOT, 'data');
-const UPLOADS_DIR = path.join(ROOT, 'uploads');
+const DATA_ROOT = process.env.DATA_ROOT || (fs.existsSync('/var/data') ? '/var/data' : __dirname);
+const DATA_DIR = path.join(DATA_ROOT, 'data');
+const UPLOADS_DIR = path.join(DATA_ROOT, 'uploads');
 const PRODUCTS_DIR = path.join(UPLOADS_DIR, 'products');
 const SLIPS_DIR = path.join(UPLOADS_DIR, 'slips');
 const BRANDING_DIR = path.join(UPLOADS_DIR, 'branding');
@@ -1010,6 +1011,7 @@ async function start() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`MM Shop listening on http://0.0.0.0:${PORT}`);
+    console.log(`DATA_ROOT: ${DATA_ROOT}`);
     console.log(`Database: ${dbType} @ ${DB_PATH}`);
     const hasHash = !!getAdminPasswordHash(db);
     console.log(
