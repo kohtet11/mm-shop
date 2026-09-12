@@ -1,0 +1,589 @@
+(() => {
+  const $ = (sel, el = document) => el.querySelector(sel);
+  const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
+
+  const STATUS_LABEL = {
+    pending: 'စောင့်ဆိုင်း',
+    paid_confirmed: 'ငွေအတည်ပြု',
+    shipped: 'ပို့ပြီး',
+    cancelled: 'ပယ်ဖျက်',
+  };
+
+  function toast(msg) {
+    const el = $('#toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => el.classList.remove('show'), 2600);
+  }
+
+  function formatMMK(n) {
+    return Number(n || 0).toLocaleString('en-US') + ' ကျပ်';
+  }
+
+  function escapeHtml(s) {
+    return String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function imgUrl(path) {
+    if (!path) return '';
+    return path.startsWith('/') ? path : '/uploads/' + path;
+  }
+
+  async function api(url, opts = {}) {
+    const res = await fetch(url, {
+      credentials: 'same-origin',
+      ...opts,
+      headers: opts.body instanceof FormData
+        ? opts.headers
+        : { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(data.error || 'Request failed');
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  }
+
+  async function checkAuth() {
+    const me = await api('/api/admin/me');
+    if (me.authenticated) showDash();
+    else showLogin();
+  }
+
+  function showLogin() {
+    $('#loginView').classList.remove('hidden');
+    $('#dashView').classList.add('hidden');
+  }
+
+  function showDash() {
+    $('#loginView').classList.add('hidden');
+    $('#dashView').classList.remove('hidden');
+    loadProducts();
+    loadOrders();
+    loadSettings();
+  }
+
+  $('#loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('#loginError').textContent = '';
+    try {
+      await api('/api/admin/login', {
+        method: 'POST',
+        body: JSON.stringify({ password: $('#password').value }),
+      });
+      showDash();
+    } catch (err) {
+      $('#loginError').textContent = err.message || 'ဝင်မရပါ';
+    }
+  });
+
+  $('#logoutBtn').addEventListener('click', async () => {
+    await api('/api/admin/logout', { method: 'POST', body: '{}' });
+    showLogin();
+  });
+
+  // Tabs
+  $$('.admin-nav [data-tab]').forEach((a) => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      const tab = a.dataset.tab;
+      $$('.admin-nav [data-tab]').forEach((x) => x.classList.toggle('active', x === a));
+      $$('.tab-panel').forEach((p) => p.classList.add('hidden'));
+      $('#tab-' + tab).classList.remove('hidden');
+    });
+  });
+
+  // Products
+  async function loadProducts() {
+    const products = await api('/api/admin/products');
+    const tbody = $('#productsTable tbody');
+    tbody.innerHTML = products
+      .map(
+        (p) => `
+      <tr>
+        <td>${p.image_path ? `<img class="thumb-sm" src="${imgUrl(p.image_path)}" alt="" />` : '—'}</td>
+        <td>
+          <strong>${escapeHtml(p.name)}</strong>
+          <div class="hint">${escapeHtml((p.description || '').slice(0, 80))}</div>
+        </td>
+        <td>${formatMMK(p.price_mmk)}</td>
+        <td>${p.active ? '<span class="badge paid_confirmed">active</span>' : '<span class="badge cancelled">inactive</span>'}</td>
+        <td class="row-actions">
+          <button type="button" class="btn btn-sm btn-outline" data-edit-product="${p.id}">ပြင်မည်</button>
+          <button type="button" class="btn btn-sm btn-danger" data-del-product="${p.id}">ဖျက်မည်</button>
+        </td>
+      </tr>`
+      )
+      .join('') || '<tr><td colspan="5" class="empty">ပစ္စည်း မရှိသေးပါ</td></tr>';
+
+    loadProducts._cache = products;
+  }
+
+  function openProductModal(product) {
+    $('#productModalTitle').textContent = product ? 'ပစ္စည်း ပြင်ဆင်ရန်' : 'ပစ္စည်း အသစ်';
+    $('#productId').value = product ? product.id : '';
+    $('#pName').value = product ? product.name : '';
+    $('#pPrice').value = product ? product.price_mmk : '';
+    $('#pDesc').value = product ? product.description || '' : '';
+    $('#pActive').checked = product ? !!product.active : true;
+    $('#pImage').value = '';
+    $('#pImageHint').textContent = product && product.image_path
+      ? 'လက်ရှိပုံ: ' + product.image_path
+      : '';
+    $('#productModal').classList.add('open');
+  }
+
+  $('#newProductBtn').addEventListener('click', () => openProductModal(null));
+  $('#closeProductModal').addEventListener('click', () =>
+    $('#productModal').classList.remove('open')
+  );
+  $('#productModal').addEventListener('click', (e) => {
+    if (e.target === $('#productModal')) $('#productModal').classList.remove('open');
+  });
+
+  $('#productForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = $('#productId').value;
+    const fd = new FormData();
+    fd.append('name', $('#pName').value.trim());
+    fd.append('price_mmk', $('#pPrice').value);
+    fd.append('description', $('#pDesc').value);
+    fd.append('active', $('#pActive').checked ? '1' : '0');
+    if ($('#pImage').files[0]) fd.append('image', $('#pImage').files[0]);
+
+    try {
+      if (id) {
+        await fetch('/api/admin/products/' + id, {
+          method: 'PUT',
+          credentials: 'same-origin',
+          body: fd,
+        }).then(async (res) => {
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Failed');
+          return data;
+        });
+      } else {
+        await fetch('/api/admin/products', {
+          method: 'POST',
+          credentials: 'same-origin',
+          body: fd,
+        }).then(async (res) => {
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Failed');
+          return data;
+        });
+      }
+      $('#productModal').classList.remove('open');
+      toast('သိမ်းပြီးပါပြီ');
+      loadProducts();
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+
+  document.addEventListener('click', async (e) => {
+    const edit = e.target.closest('[data-edit-product]');
+    if (edit) {
+      const id = Number(edit.dataset.editProduct);
+      const p = (loadProducts._cache || []).find((x) => x.id === id);
+      if (p) openProductModal(p);
+      return;
+    }
+    const del = e.target.closest('[data-del-product]');
+    if (del) {
+      if (!confirm('ဤပစ္စည်းကို ဖျက်မည်လား?')) return;
+      try {
+        await api('/api/admin/products/' + del.dataset.delProduct, {
+          method: 'DELETE',
+          body: '{}',
+        });
+        toast('ဖျက်ပြီးပါပြီ');
+        loadProducts();
+      } catch (err) {
+        toast(err.message);
+      }
+      return;
+    }
+    const view = e.target.closest('[data-view-order]');
+    if (view) {
+      openOrder(view.dataset.viewOrder);
+      return;
+    }
+    const delOrder = e.target.closest('[data-del-order]');
+    if (delOrder) {
+      const oid = delOrder.dataset.delOrder;
+      openPasswordConfirm({
+        title: 'အော်ဒါ ဖျက်ရန်',
+        message: 'အော်ဒါ ' + oid + ' ကို ဖျက်မည်။ အက်ဒမင် စကားဝှက် ထည့်ပါ။',
+        pending: { type: 'one', orderId: oid },
+      });
+      return;
+    }
+  });
+
+
+  // Password-gated order delete
+  let pendingDelete = null; // { type: 'one'|'all', orderId?: string }
+
+  function openPasswordConfirm({ title, message, pending }) {
+    pendingDelete = pending;
+    $('#passwordConfirmTitle').textContent = title;
+    $('#passwordConfirmMsg').textContent = message;
+    $('#passwordConfirmError').textContent = '';
+    $('#confirmAdminPassword').value = '';
+    $('#passwordConfirmModal').classList.add('open');
+    setTimeout(() => $('#confirmAdminPassword').focus(), 50);
+  }
+
+  function closePasswordConfirm() {
+    pendingDelete = null;
+    $('#passwordConfirmModal').classList.remove('open');
+    $('#confirmAdminPassword').value = '';
+    $('#passwordConfirmError').textContent = '';
+  }
+
+  $('#closePasswordConfirm').addEventListener('click', closePasswordConfirm);
+  $('#cancelPasswordConfirm').addEventListener('click', closePasswordConfirm);
+  $('#passwordConfirmModal').addEventListener('click', (e) => {
+    if (e.target === $('#passwordConfirmModal')) closePasswordConfirm();
+  });
+
+  $('#passwordConfirmForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const password = $('#confirmAdminPassword').value;
+    if (!password) {
+      $('#passwordConfirmError').textContent = 'စကားဝှက် ထည့်ပါ';
+      return;
+    }
+    if (!pendingDelete) return;
+    const job = pendingDelete;
+    try {
+      if (job.type === 'all') {
+        await api('/api/admin/orders', {
+          method: 'DELETE',
+          body: JSON.stringify({ password }),
+        });
+        toast('အော်ဒါအားလုံး ဖျက်ပြီးပါပြီ');
+      } else {
+        await api('/api/admin/orders/' + encodeURIComponent(job.orderId), {
+          method: 'DELETE',
+          body: JSON.stringify({ password }),
+        });
+        toast('အော်ဒါ ဖျက်ပြီးပါပြီ');
+        $('#orderModal').classList.remove('open');
+      }
+      closePasswordConfirm();
+      loadOrders();
+    } catch (err) {
+      $('#passwordConfirmError').textContent = err.message || 'ဖျက်မရပါ';
+      if (err.status === 403) {
+        // wrong password — keep modal open
+      }
+    }
+  });
+
+  const clearAllBtn = $('#clearAllOrdersBtn');
+  if (clearAllBtn) {
+    clearAllBtn.addEventListener('click', () => {
+      openPasswordConfirm({
+        title: 'အားလုံး ဖျက်ရန်',
+        message: 'အော်ဒါမှတ်တမ်းအားလုံးနှင့် စလစ်ပုံများကို ဖျက်မည်။ အက်ဒမင် စကားဝှက် ထည့်ပါ။',
+        pending: { type: 'all' },
+      });
+    });
+  }
+
+  // Orders
+  async function loadOrders() {
+    const orders = await api('/api/admin/orders');
+    const tbody = $('#ordersTable tbody');
+    tbody.innerHTML = orders
+      .map(
+        (o) => `
+      <tr>
+        <td>
+          <strong>${escapeHtml(o.order_id)}</strong>
+          <div class="hint">${escapeHtml(o.created_at || '')}</div>
+        </td>
+        <td>
+          ${escapeHtml(o.customer_name)}<br/>
+          <span class="hint">${escapeHtml(o.phone)}</span>
+        </td>
+        <td>${formatMMK(o.total_mmk)}</td>
+        <td><span class="badge ${escapeHtml(o.status)}">${STATUS_LABEL[o.status] || o.status}</span></td>
+        <td>${
+          o.slip_path
+            ? `<img class="thumb-sm" src="${imgUrl(o.slip_path)}" alt="slip" />`
+            : '—'
+        }</td>
+        <td class="row-actions" style="gap:0.35rem;flex-wrap:wrap">
+          <button type="button" class="btn btn-sm btn-outline" data-view-order="${escapeHtml(o.order_id)}">ကြည့်မည်</button>
+          <button type="button" class="btn btn-sm btn-danger" data-del-order="${escapeHtml(o.order_id)}">ဖျက်မည်</button>
+        </td>
+      </tr>`
+      )
+      .join('') || '<tr><td colspan="6" class="empty">အော်ဒါ မရှိသေးပါ</td></tr>';
+  }
+
+  async function openOrder(orderId) {
+    const o = await api('/api/admin/orders/' + encodeURIComponent(orderId));
+    const itemsHtml = (o.items || [])
+      .map(
+        (it) =>
+          `<li>${escapeHtml(it.product_name)} × ${it.quantity} — ${formatMMK(
+            it.unit_price_mmk * it.quantity
+          )}</li>`
+      )
+      .join('');
+
+    $('#orderDetail').innerHTML = `
+      <p><strong>အော်ဒါ:</strong> ${escapeHtml(o.order_id)}</p>
+      <p><strong>အမည်:</strong> ${escapeHtml(o.customer_name)}</p>
+      <p><strong>ဖုန်း:</strong> ${escapeHtml(o.phone)}</p>
+      <p><strong>လိပ်စာ:</strong> ${escapeHtml(o.address)}</p>
+      <p><strong>မှတ်ချက်:</strong> ${escapeHtml(o.notes || '—')}</p>
+      <p><strong>စုစုပေါင်း:</strong> ${formatMMK(o.total_mmk)}</p>
+      <p><strong>အချိန်:</strong> ${escapeHtml(o.created_at || '')}</p>
+      <div class="form-group">
+        <label>အခြေအနေ</label>
+        <select id="orderStatus">
+          ${['pending', 'paid_confirmed', 'shipped', 'cancelled']
+            .map(
+              (s) =>
+                `<option value="${s}" ${o.status === s ? 'selected' : ''}>${
+                  STATUS_LABEL[s]
+                }</option>`
+            )
+            .join('')}
+        </select>
+      </div>
+      <div class="row-actions" style="gap:0.5rem;flex-wrap:wrap;margin-bottom:0.75rem">
+        <button type="button" class="btn btn-primary btn-sm" id="saveStatusBtn" data-oid="${escapeHtml(
+        o.order_id
+      )}">အခြေအနေ သိမ်းမည်</button>
+        <button type="button" class="btn btn-danger btn-sm" id="deleteOrderBtn" data-oid="${escapeHtml(
+        o.order_id
+      )}">ဖျက်မည်</button>
+      </div>
+      <h3 style="margin-bottom:0.35rem">ပစ္စည်းများ</h3>
+      <ul>${itemsHtml || '<li>—</li>'}</ul>
+      <h3 style="margin-bottom:0.35rem">ငွေလွှဲစလစ်</h3>
+      ${
+        o.slip_path
+          ? `<a href="${imgUrl(o.slip_path)}" target="_blank" rel="noopener"><img class="slip-preview" src="${imgUrl(
+              o.slip_path
+            )}" alt="slip" /></a>`
+          : '<p>—</p>'
+      }
+    `;
+    $('#orderModal').classList.add('open');
+
+    $('#saveStatusBtn').onclick = async () => {
+      try {
+        await api('/api/admin/orders/' + encodeURIComponent(o.order_id) + '/status', {
+          method: 'PATCH',
+          body: JSON.stringify({ status: $('#orderStatus').value }),
+        });
+        toast('အခြေအနေ ပြောင်းပြီး');
+        loadOrders();
+        openOrder(o.order_id);
+      } catch (err) {
+        toast(err.message);
+      }
+    };
+
+    const delBtn = $('#deleteOrderBtn');
+    if (delBtn) {
+      delBtn.onclick = () => {
+        openPasswordConfirm({
+          title: 'အော်ဒါ ဖျက်ရန်',
+          message: 'အော်ဒါ ' + o.order_id + ' ကို ဖျက်မည်။ အက်ဒမင် စကားဝှက် ထည့်ပါ။',
+          pending: { type: 'one', orderId: o.order_id },
+        });
+      };
+    }
+  }
+
+  $('#closeOrderModal').addEventListener('click', () =>
+    $('#orderModal').classList.remove('open')
+  );
+  $('#orderModal').addEventListener('click', (e) => {
+    if (e.target === $('#orderModal')) $('#orderModal').classList.remove('open');
+  });
+
+  // Settings
+  function applyAdminBrand(s) {
+    const name = (s && s.shop_name) || 'MM Shop';
+    const brand = $('#adminBrand');
+    if (brand) brand.textContent = name + ' Admin';
+    document.title = name + ' Admin';
+  }
+
+  function renderLogoPreview(logoUrl) {
+    const wrap = $('#logoPreviewWrap');
+    const img = $('#logoPreview');
+    const hint = $('#logoHint');
+    if (logoUrl) {
+      img.src = logoUrl;
+      wrap.classList.remove('hidden');
+      hint.textContent = 'လက်ရှိလိုဂို';
+    } else {
+      img.removeAttribute('src');
+      wrap.classList.add('hidden');
+      hint.textContent = 'လိုဂိုမရှိသေးပါ';
+    }
+  }
+
+  function renderMmqrPreview(mmqrUrl) {
+    const wrap = $('#mmqrPreviewWrap');
+    const img = $('#mmqrPreview');
+    const hint = $('#mmqrHint');
+    if (!wrap || !img || !hint) return;
+    if (mmqrUrl) {
+      img.src = mmqrUrl;
+      wrap.classList.remove('hidden');
+      hint.textContent = 'လက်ရှိ MMQR';
+    } else {
+      img.removeAttribute('src');
+      wrap.classList.add('hidden');
+      hint.textContent = 'MMQR မရှိသေးပါ';
+    }
+  }
+
+  async function loadSettings() {
+    const s = await api('/api/admin/settings');
+    $('#bank_name').value = s.bank_name || '';
+    $('#account_number').value = s.account_number || '';
+    $('#account_name').value = s.account_name || '';
+    $('#payment_note').value = s.payment_note || '';
+    $('#shop_name').value = s.shop_name || 'MM Shop';
+    renderLogoPreview(s.logo_url || '');
+    renderMmqrPreview(s.mmqr_url || '');
+    applyAdminBrand(s);
+    loadSettings._cache = s;
+  }
+
+  $('#settingsForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('/api/admin/settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          bank_name: $('#bank_name').value,
+          account_number: $('#account_number').value,
+          account_name: $('#account_name').value,
+          payment_note: $('#payment_note').value,
+        }),
+      });
+
+      const file = $('#mmqrFile').files[0];
+      if (file) {
+        const fd = new FormData();
+        fd.append('mmqr', file);
+        const res = await fetch('/api/admin/payment/mmqr', {
+          method: 'POST',
+          credentials: 'same-origin',
+          body: fd,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'MMQR တင်မရပါ');
+        renderMmqrPreview(data.mmqr_url || '');
+        $('#mmqrFile').value = '';
+      }
+
+      toast('ငွေပေးချေမှု သိမ်းပြီး');
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+
+  $('#removeMmqrBtn').addEventListener('click', async () => {
+    if (!confirm('MMQR ကို ဖယ်ရှားမည်လား?')) return;
+    try {
+      await api('/api/admin/payment/mmqr', { method: 'DELETE', body: '{}' });
+      renderMmqrPreview('');
+      toast('MMQR ဖယ်ရှားပြီး');
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+
+  $('#brandingForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const s = await api('/api/admin/settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          shop_name: $('#shop_name').value.trim() || 'MM Shop',
+        }),
+      });
+
+      const file = $('#logoFile').files[0];
+      if (file) {
+        const fd = new FormData();
+        fd.append('logo', file);
+        const res = await fetch('/api/admin/branding/logo', {
+          method: 'POST',
+          credentials: 'same-origin',
+          body: fd,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'လိုဂို တင်မရပါ');
+        s.logo_url = data.logo_url;
+        s.logo_path = data.logo_path;
+        $('#logoFile').value = '';
+      }
+
+      renderLogoPreview(s.logo_url || '');
+      applyAdminBrand(s);
+      toast('အမှတ်တံဆိပ် သိမ်းပြီး');
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+
+  $('#removeLogoBtn').addEventListener('click', async () => {
+    if (!confirm('လိုဂိုကို ဖယ်ရှားမည်လား?')) return;
+    try {
+      await api('/api/admin/branding/logo', { method: 'DELETE', body: '{}' });
+      renderLogoPreview('');
+      toast('လိုဂို ဖယ်ရှားပြီး');
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+
+  $('#passwordForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const currentPassword = $('#currentPassword').value;
+    const newPassword = $('#newPassword').value;
+    const confirmPassword = $('#confirmPassword').value;
+    if (newPassword.length < 6) {
+      toast('စကားဝှက်အသစ် အနည်းဆုံး ၆ လုံး');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast('စကားဝှက်အသစ် မကိုက်ညီပါ');
+      return;
+    }
+    try {
+      await api('/api/admin/password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      $('#passwordForm').reset();
+      toast('စကားဝှက် ပြောင်းပြီးပါပြီ');
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+
+  checkAuth().catch(() => showLogin());
+})();

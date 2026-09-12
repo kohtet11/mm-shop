@@ -1,0 +1,13 @@
+node_modules/
+data/*.db
+data/*.db-*
+uploads/products/*
+uploads/slips/*
+uploads/branding/*
+uploads/payment/*
+!uploads/products/.gitkeep
+!uploads/slips/.gitkeep
+!uploads/branding/.gitkeep
+!uploads/payment/.gitkeep
+.env
+*.log

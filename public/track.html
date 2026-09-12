@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="my">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>အော်ဒါအခြေအနေ စစ်ရန် — MM Shop</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container inner">
+      <a class="logo" href="/" id="siteLogo"><img id="siteLogoImg" class="site-logo-img hidden" alt="" /><span id="siteLogoText">🛒 MM Shop</span></a>
+      <div class="header-actions">
+        <a class="cart-btn" href="/track" aria-current="page">အော်ဒါ စစ်ရန်</a>
+        <a class="cart-btn" href="/">စတိုးသို့</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container track-page">
+    <section class="hero">
+      <h1>အော်ဒါအခြေအနေ စစ်ရန်</h1>
+      <p>အော်ဒါနံပါတ်နှင့် ဖုန်းနံပါတ် ထည့်သွင်းပြီး စစ်ဆေးပါ (ကိုယ်ရေးလုံခြုံမှုအတွက် နှစ်ခုလုံး လိုအပ်သည်)</p>
+    </section>
+
+    <section class="track-card">
+      <form id="trackForm">
+        <div class="form-group">
+          <label for="orderId">အော်ဒါနံပါတ် *</label>
+          <input id="orderId" name="orderId" required autocomplete="off" placeholder="MM…" />
+        </div>
+        <div class="form-group">
+          <label for="phone">ဖုန်းနံပါတ် *</label>
+          <input id="phone" name="phone" required autocomplete="tel" placeholder="09xxxxxxxxx" />
+        </div>
+        <button type="submit" class="btn btn-primary" id="trackBtn" style="width:100%">
+          စစ်ဆေးမည်
+        </button>
+      </form>
+
+      <div id="trackError" class="track-error hidden" role="alert"></div>
+
+      <div id="trackResult" class="track-result hidden">
+        <div class="flex-between" style="margin-bottom:0.75rem">
+          <div>
+            <div class="hint">အော်ဒါနံပါတ်</div>
+            <div class="order-id" id="resultOrderId"></div>
+          </div>
+          <span class="badge" id="resultStatus"></span>
+        </div>
+
+        <div class="track-meta">
+          <div>
+            <span class="hint">တင်သွင်းချိန်</span>
+            <div id="resultCreated"></div>
+          </div>
+          <div>
+            <span class="hint">ငွေလွှဲစလစ်</span>
+            <div id="resultSlip"></div>
+          </div>
+          <div>
+            <span class="hint">စုစုပေါင်း</span>
+            <div class="price" id="resultTotal"></div>
+          </div>
+        </div>
+
+        <h3 style="margin:1.25rem 0 0.5rem;font-size:1rem">ပစ္စည်းများ</h3>
+        <div id="resultItems"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <a href="/">ပင်မစာမျက်နှာ</a>
+      <a href="/track">အော်ဒါအခြေအနေ စစ်ရန်</a>
+    </div>
+  </footer>
+
+  <div class="toast" id="toast"></div>
+  <script src="/js/track.js"></script>
+</body>
+</html>

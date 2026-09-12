@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="my">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MM Shop Admin</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body class="admin-body">
+  <!-- Login -->
+  <div id="loginView" class="login-wrap">
+    <div class="login-card">
+      <h1 style="margin-top:0">Admin ဝင်ရန်</h1>
+      <p class="hint">စီမံခန့်ခွဲမှု ဒက်ရှ်ဘုတ်</p>
+      <form id="loginForm">
+        <div class="form-group">
+          <label for="password">စကားဝှက်</label>
+          <input type="password" id="password" required autocomplete="current-password" />
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%">ဝင်မည်</button>
+        <p id="loginError" class="hint" style="color:var(--danger)"></p>
+      </form>
+    </div>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="dashView" class="admin-shell hidden">
+    <nav class="admin-nav">
+      <div class="brand" id="adminBrand">MM Shop Admin</div>
+      <div class="nav-links">
+        <a href="#products" data-tab="products" class="active">ပစ္စည်းများ</a>
+        <a href="#orders" data-tab="orders">အော်ဒါများ</a>
+        <a href="#settings" data-tab="settings">ဆက်တင်</a>
+      </div>
+      <div style="margin-top:1.5rem">
+        <a href="/" target="_blank" rel="noopener">စတိုးဖွင့်ရန် ↗</a>
+        <button type="button" class="btn btn-sm btn-outline" id="logoutBtn" style="margin-top:0.75rem;width:100%">ထွက်မည်</button>
+      </div>
+    </nav>
+
+    <main class="admin-main">
+      <!-- Products -->
+      <section id="tab-products" class="tab-panel">
+        <div class="flex-between" style="margin-bottom:1rem">
+          <h1 style="margin:0">ပစ္စည်းများ</h1>
+          <button type="button" class="btn btn-primary" id="newProductBtn">+ အသစ်ထည့်မည်</button>
+        </div>
+        <div class="admin-card table-wrap">
+          <table class="data" id="productsTable">
+            <thead>
+              <tr>
+                <th>ပုံ</th>
+                <th>အမည်</th>
+                <th>ဈေး</th>
+                <th>အခြေအနေ</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Orders -->
+      <section id="tab-orders" class="tab-panel hidden">
+        <div class="row-actions" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.75rem;margin-bottom:0.75rem">
+          <h1 style="margin:0">အော်ဒါများ</h1>
+          <button type="button" class="btn btn-danger btn-sm" id="clearAllOrdersBtn">အားလုံး ဖျက်ရန်</button>
+        </div>
+        <div class="admin-card table-wrap">
+          <table class="data" id="ordersTable">
+            <thead>
+              <tr>
+                <th>အော်ဒါ</th>
+                <th>အမည် / ဖုန်း</th>
+                <th>စုစုပေါင်း</th>
+                <th>အခြေအနေ</th>
+                <th>စလစ်</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Settings -->
+      <section id="tab-settings" class="tab-panel hidden">
+        <h1 style="margin-top:0">ဆက်တင်</h1>
+
+        <div class="admin-card" style="max-width:520px;margin-bottom:1.25rem">
+          <h2 style="margin-top:0;font-size:1.1rem">စတိုးအမှတ်တံဆိပ်</h2>
+          <form id="brandingForm">
+            <div class="form-group">
+              <label for="shop_name">စတိုးအမည် (စာမျက်နှာခေါင်းစဉ်)</label>
+              <input id="shop_name" name="shop_name" placeholder="MM Shop" />
+            </div>
+            <div class="form-group">
+              <label for="logoFile">လိုဂို ပုံ (ရွေးချယ်နိုင်)</label>
+              <input id="logoFile" type="file" accept="image/*" />
+              <div class="hint" id="logoHint">လိုဂိုမရှိသေးပါ</div>
+              <div id="logoPreviewWrap" class="logo-preview-wrap hidden" style="margin-top:0.5rem">
+                <img id="logoPreview" class="logo-preview" alt="logo preview" />
+              </div>
+            </div>
+            <div class="row-actions" style="gap:0.5rem;flex-wrap:wrap">
+              <button type="submit" class="btn btn-primary">အမှတ်တံဆိပ် သိမ်းမည်</button>
+              <button type="button" class="btn btn-outline btn-sm" id="removeLogoBtn">လိုဂို ဖယ်ရှားမည်</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="admin-card" style="max-width:520px;margin-bottom:1.25rem">
+          <h2 style="margin-top:0;font-size:1.1rem">ဘဏ်လွှဲငွေ</h2>
+          <form id="settingsForm">
+            <div class="form-group">
+              <label for="bank_name">ဘဏ်အမည်</label>
+              <input id="bank_name" name="bank_name" />
+            </div>
+            <div class="form-group">
+              <label for="account_number">အကောင့်နံပါတ်</label>
+              <input id="account_number" name="account_number" />
+            </div>
+            <div class="form-group">
+              <label for="account_name">အကောင့်အမည်</label>
+              <input id="account_name" name="account_name" />
+            </div>
+            <div class="form-group">
+              <label for="payment_note">မှတ်ချက် (စတိုးတွင် ပြမည်)</label>
+              <textarea id="payment_note" name="payment_note"></textarea>
+            </div>
+            <div class="form-group">
+              <label for="mmqrFile">MMQR ပုံ (ငွေလွှဲ QR)</label>
+              <input id="mmqrFile" type="file" accept="image/*" />
+              <div class="hint" id="mmqrHint">MMQR မရှိသေးပါ</div>
+              <div id="mmqrPreviewWrap" class="logo-preview-wrap hidden" style="margin-top:0.5rem">
+                <img id="mmqrPreview" class="logo-preview" alt="MMQR preview" />
+              </div>
+            </div>
+            <div class="row-actions" style="gap:0.5rem;flex-wrap:wrap">
+              <button type="submit" class="btn btn-primary">ငွေပေးချေမှု သိမ်းမည်</button>
+              <button type="button" class="btn btn-outline btn-sm" id="removeMmqrBtn">MMQR ဖယ်ရှားမည်</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="admin-card" style="max-width:520px">
+          <h2 style="margin-top:0;font-size:1.1rem">စကားဝှက် ပြောင်းရန်</h2>
+          <form id="passwordForm">
+            <div class="form-group">
+              <label for="currentPassword">လက်ရှိ စကားဝှက်</label>
+              <input type="password" id="currentPassword" required autocomplete="current-password" />
+            </div>
+            <div class="form-group">
+              <label for="newPassword">စကားဝှက်အသစ်</label>
+              <input type="password" id="newPassword" required minlength="6" autocomplete="new-password" />
+            </div>
+            <div class="form-group">
+              <label for="confirmPassword">စကားဝှက်အသစ် ထပ်ရိုက်ပါ</label>
+              <input type="password" id="confirmPassword" required minlength="6" autocomplete="new-password" />
+            </div>
+            <p class="hint">အနည်းဆုံး ၆ လုံး။ ပြောင်းပြီးနောက် နောက်ဝင်ခါမှ စကားဝှက်အသစ်သုံးပါ။</p>
+            <button type="submit" class="btn btn-primary">စကားဝှက် ပြောင်းမည်</button>
+          </form>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Product modal -->
+  <div class="overlay" id="productModal">
+    <div class="panel">
+      <div class="panel-header">
+        <h2 id="productModalTitle">ပစ္စည်း</h2>
+        <button type="button" class="close-x" id="closeProductModal">×</button>
+      </div>
+      <form id="productForm">
+        <input type="hidden" id="productId" />
+        <div class="form-group">
+          <label for="pName">အမည် *</label>
+          <input id="pName" required />
+        </div>
+        <div class="form-group">
+          <label for="pPrice">ဈေးနှုန်း (ကျပ်) *</label>
+          <input id="pPrice" type="number" min="0" step="1" required />
+        </div>
+        <div class="form-group">
+          <label for="pDesc">ဖော်ပြချက်</label>
+          <textarea id="pDesc"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="pImage">ပုံ</label>
+          <input id="pImage" type="file" accept="image/*" />
+          <div class="hint" id="pImageHint"></div>
+        </div>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="pActive" checked /> စတိုးတွင် ပြမည် (active)
+          </label>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%">သိမ်းမည်</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Order detail modal -->
+  <div class="overlay" id="orderModal">
+    <div class="panel">
+      <div class="panel-header">
+        <h2>အော်ဒါ အသေးစိတ်</h2>
+        <button type="button" class="close-x" id="closeOrderModal">×</button>
+      </div>
+      <div id="orderDetail"></div>
+    </div>
+  </div>
+
+
+  <!-- Password confirm for delete -->
+  <div class="overlay" id="passwordConfirmModal">
+    <div class="panel" style="max-width:400px">
+      <div class="panel-header">
+        <h2 id="passwordConfirmTitle">ဖျက်ရန် အတည်ပြုပါ</h2>
+        <button type="button" class="close-x" id="closePasswordConfirm">×</button>
+      </div>
+      <p id="passwordConfirmMsg" class="hint" style="margin-top:0"></p>
+      <form id="passwordConfirmForm">
+        <div class="form-group">
+          <label for="confirmAdminPassword">အက်ဒမင် စကားဝှက် *</label>
+          <input type="password" id="confirmAdminPassword" required autocomplete="current-password" placeholder="စကားဝှက် ထည့်ပါ" />
+        </div>
+        <p id="passwordConfirmError" class="hint" style="color:var(--danger);min-height:1.2em"></p>
+        <div class="row-actions" style="gap:0.5rem;justify-content:flex-end">
+          <button type="button" class="btn btn-outline btn-sm" id="cancelPasswordConfirm">ပယ်ဖျက်</button>
+          <button type="submit" class="btn btn-danger btn-sm">ဖျက်မည်</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="/js/admin.js"></script>
+</body>
+</html>

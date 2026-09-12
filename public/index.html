@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="my">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MM Shop — အွန်လိုင်းစတိုး</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container inner">
+      <a class="logo" href="/" id="siteLogo"><img id="siteLogoImg" class="site-logo-img hidden" alt="" /><span id="siteLogoText">🛒 MM Shop</span></a>
+      <div class="header-actions">
+        <a class="cart-btn" href="/track">အော်ဒါ စစ်ရန်</a>
+        <button type="button" class="cart-btn" id="openCartBtn" aria-label="ခြင်းတောင်း">
+          ခြင်းတောင်း (<span id="cartCount">0</span>)
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <h1>ဘလိုင်ဘောက်စ် &amp; စုဆောင်းပစ္စည်းများ</h1>
+      <p>အိမ်အရောက်ပို့ — ဘဏ်လွှဲငွေဖြင့် အော်ဒါတင်ပါ</p>
+    </section>
+    <section class="products-grid" id="productsGrid">
+      <div class="empty">ပစ္စည်းများ ဖတ်နေသည်…</div>
+    </section>
+  </main>
+
+  <!-- Cart overlay -->
+  <div class="overlay" id="cartOverlay" role="dialog" aria-modal="true">
+    <div class="panel">
+      <div class="panel-header">
+        <h2>ခြင်းတောင်း</h2>
+        <button type="button" class="close-x" data-close="cartOverlay" aria-label="ပိတ်ရန်">×</button>
+      </div>
+      <div id="cartList"></div>
+      <div class="cart-total">
+        <span>စုစုပေါင်း</span>
+        <span id="cartTotal">0 ကျပ်</span>
+      </div>
+      <button type="button" class="btn btn-pink" id="goCheckoutBtn" style="width:100%">အော်ဒါတင်ရန်</button>
+
+      <div class="my-orders-section" id="myOrdersSection">
+        <div class="my-orders-header">
+          <h3>ကျွန်ုပ်၏ အော်ဒါများ</h3>
+          <a class="hint" href="/track">အပြည့်အစုံ စစ်ရန် →</a>
+        </div>
+        <div id="myOrdersList" class="my-orders-list">
+          <div class="empty hint">အော်ဒါ မရှိသေးပါ</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Checkout overlay -->
+  <div class="overlay" id="checkoutOverlay" role="dialog" aria-modal="true">
+    <div class="panel">
+      <div class="panel-header">
+        <h2>ငွေချေ &amp; အော်ဒါတင်ရန်</h2>
+        <button type="button" class="close-x" data-close="checkoutOverlay" aria-label="ပိတ်ရန်">×</button>
+      </div>
+
+      <div id="checkoutFormView">
+        <div class="pay-box" id="payInstructions">
+          <div>ငွေလွှဲညွှန်ကြားချက် ဖတ်နေသည်…</div>
+        </div>
+
+        <form id="checkoutForm">
+          <div class="form-group">
+            <label for="customerName">အမည် *</label>
+            <input id="customerName" name="customer_name" required autocomplete="name" />
+          </div>
+          <div class="form-group">
+            <label for="phone">ဖုန်းနံပါတ် *</label>
+            <input id="phone" name="phone" required autocomplete="tel" placeholder="09xxxxxxxxx" />
+          </div>
+          <div class="form-group">
+            <label for="address">ပို့ဆောင်ရမည့် လိပ်စာ *</label>
+            <textarea id="address" name="address" required></textarea>
+          </div>
+          <div class="form-group">
+            <label for="notes">မှတ်ချက် (ရွေးချယ်နိုင်)</label>
+            <textarea id="notes" name="notes" placeholder="ဥပမာ — ညနေပိုင်း ပို့ပေးပါ"></textarea>
+          </div>
+          <div class="form-group">
+            <label for="slip">ငွေလွှဲစလစ် ပုံ *</label>
+            <input id="slip" name="slip" type="file" accept="image/*" required />
+            <div class="hint">ဘဏ်သို့ လွှဲပြီး စလစ်ပုံတင်မှ အော်ဒါတင်နိုင်သည်</div>
+          </div>
+          <div class="cart-total">
+            <span>ပေးရမည့်ငွေ</span>
+            <span id="checkoutTotal">0 ကျပ်</span>
+          </div>
+          <button type="submit" class="btn btn-primary" id="submitOrderBtn" style="width:100%">
+            အော်ဒါ အတည်ပြုမည်
+          </button>
+        </form>
+      </div>
+
+      <div id="checkoutSuccess" class="success-box hidden">
+        <div style="font-size:2.5rem">✅</div>
+        <h2>အော်ဒါ အောင်မြင်ပါသည်!</h2>
+        <p>သင့်အော်ဒါနံပါတ်</p>
+        <div class="order-id" id="successOrderId"></div>
+        <p class="hint">ဤနံပါတ်ကို သိမ်းထားပါ။ ဆက်သွယ်ရန် အသုံးပြုပါမည်။</p>
+        <a class="btn btn-pink" id="trackOrderLink" href="/track" style="display:inline-block;margin:0.5rem 0 0.75rem">အော်ဒါအခြေအနေ စစ်ရန်</a>
+        <div>
+          <button type="button" class="btn btn-primary" id="doneBtn">ပင်မစာမျက်နှာသို့</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">
+      <a href="/">ပင်မစာမျက်နှာ</a>
+      <a href="/track">အော်ဒါအခြေအနေ စစ်ရန်</a>
+    </div>
+  </footer>
+
+  <div class="toast" id="toast"></div>
+  <script src="/js/shop.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Creates a web service at https://mm-shop.onrender.com (stable while the service exists).
+services:
+  - type: web
+    name: mm-shop
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: ADMIN_PASSWORD
+        generateValue: true
+      - key: NODE_VERSION
+        value: "20"
