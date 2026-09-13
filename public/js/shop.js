@@ -3,6 +3,7 @@
   const MY_ORDERS_KEY = 'mm_shop_my_orders';
   const MY_ORDERS_MAX = 20;
   let products = [];
+  let storeCategories = [];
   let productQuery = '';
   let productCategory = 'blind_box';
   let cart = loadCart();
@@ -269,6 +270,42 @@
   function imgUrl(path) {
     if (!path) return '';
     return path.startsWith('/') ? path : '/uploads/' + path;
+  }
+
+  function renderCategoryChips() {
+    const nav = $('#categoryChips');
+    if (!nav) return;
+    const allActive = productCategory === 'all';
+    let html =
+      `<button type="button" class="chip${allActive ? ' active' : ''}" data-category="all"${allActive ? ' aria-current="true"' : ''}>အားလုံး</button>`;
+    for (const c of storeCategories) {
+      const slug = String(c.slug || '');
+      if (!slug) continue;
+      const on = productCategory === slug;
+      const label = escapeHtml(c.name || slug);
+      html +=
+        `<button type="button" class="chip${on ? ' active' : ''}" data-category="${escapeHtml(slug)}"${on ? ' aria-current="true"' : ''}>${label}</button>`;
+    }
+    nav.innerHTML = html;
+    syncCategoryChips();
+  }
+
+  async function fetchCategories() {
+    try {
+      const res = await fetch('/api/categories');
+      const list = await res.json();
+      storeCategories = Array.isArray(list) ? list : [];
+    } catch (_) {
+      storeCategories = [];
+    }
+    if (
+      productCategory !== 'all' &&
+      storeCategories.length &&
+      !storeCategories.some((c) => c.slug === productCategory)
+    ) {
+      productCategory = 'blind_box';
+    }
+    renderCategoryChips();
   }
 
   async function fetchProducts() {
@@ -1398,7 +1435,7 @@
   });
 
   updateCartCount();
-  fetchProducts();
+  fetchCategories().then(() => fetchProducts());
   fetchPayment();
   fetchSpinPrizes();
   fetchSpinBuyProduct();

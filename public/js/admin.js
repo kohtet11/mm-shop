@@ -65,6 +65,7 @@
   function showDash() {
     $('#loginView').classList.add('hidden');
     $('#dashView').classList.remove('hidden');
+    loadCategories().catch(() => {});
     loadProducts();
     loadSpinPrizes().catch(() => {});
     loadSpinWins().catch(() => {});
@@ -105,7 +106,189 @@
       $('#tab-' + tab).classList.remove('hidden');
       if (tab === 'chat') startChatPolling();
       else stopChatPolling();
+      if (tab === 'categories') loadCategories().catch(() => {});
     });
+  });
+
+  // Categories
+  const PROTECTED_CAT_SLUGS = new Set(['blind_box', 'spin_game']);
+
+  function categoryLabel(slug) {
+    const s = String(slug || '');
+    const cats = loadCategories._cache || [];
+    const found = cats.find((c) => c.slug === s);
+    if (found && found.name) return found.name;
+    return (
+      { blind_box: 'Blind box', accessories: 'Accessories', spin_game: 'Game', other: 'Other' }[s] ||
+      s ||
+      'အခြား'
+    );
+  }
+
+  function fillProductCategorySelect(selected) {
+    const sel = $('#pCategory');
+    if (!sel) return;
+    const cats = loadCategories._cache || [];
+    const want = selected || sel.value || 'blind_box';
+    const list = cats.length
+      ? cats
+      : [
+          { slug: 'blind_box', name: 'Blind box' },
+          { slug: 'accessories', name: 'Accessories' },
+          { slug: 'spin_game', name: 'Game' },
+          { slug: 'other', name: 'Other' },
+        ];
+    sel.innerHTML = list
+      .map(
+        (c) =>
+          `<option value="${escapeHtml(c.slug)}">${escapeHtml(c.name || c.slug)}</option>`
+      )
+      .join('');
+    if (want && ![...sel.options].some((o) => o.value === want)) {
+      const opt = document.createElement('option');
+      opt.value = want;
+      opt.textContent = want;
+      sel.appendChild(opt);
+    }
+    sel.value = want;
+  }
+
+  async function loadCategories() {
+    const cats = await api('/api/admin/categories');
+    loadCategories._cache = cats;
+    fillProductCategorySelect($('#pCategory') ? $('#pCategory').value : 'blind_box');
+    const tbody = $('#categoriesTable tbody');
+    if (!tbody) return cats;
+    tbody.innerHTML =
+      cats
+        .map((c) => {
+          const protected = PROTECTED_CAT_SLUGS.has(c.slug);
+          const count = Number(c.product_count) || 0;
+          return `
+      <tr>
+        <td><strong>${escapeHtml(c.name)}</strong>${protected ? ' <span class="hint">(built-in)</span>' : ''}</td>
+        <td><code>${escapeHtml(c.slug)}</code></td>
+        <td>${Number(c.sort_order) || 0}</td>
+        <td>${count}</td>
+        <td>${c.active ? '<span class="badge paid_confirmed">active</span>' : '<span class="badge cancelled">inactive</span>'}</td>
+        <td class="row-actions">
+          <button type="button" class="btn btn-sm btn-outline" data-edit-category="${c.id}">ပြင်မည်</button>
+          <button type="button" class="btn btn-sm btn-outline" data-toggle-category="${c.id}" data-active="${c.active ? 0 : 1}">${c.active ? 'ပိတ်မည်' : 'ဖွင့်မည်'}</button>
+          <button type="button" class="btn btn-sm btn-danger" data-del-category="${c.id}" ${protected ? 'disabled title="Built-in — ဖျက်မရ"' : ''}>ဖျက်မည်</button>
+        </td>
+      </tr>`;
+        })
+        .join('') || '<tr><td colspan="6" class="empty">အမျိုးအစား မရှိသေးပါ</td></tr>';
+    return cats;
+  }
+
+  function openCategoryModal(cat) {
+    $('#categoryModalTitle').textContent = cat ? 'အမျိုးအစား ပြင်ဆင်ရန်' : 'အမျိုးအစား အသစ်';
+    $('#categoryId').value = cat ? cat.id : '';
+    $('#cName').value = cat ? cat.name : '';
+    const slugInput = $('#cSlug');
+    slugInput.value = cat ? cat.slug : '';
+    const protected = cat && PROTECTED_CAT_SLUGS.has(cat.slug);
+    slugInput.disabled = !!protected;
+    $('#cSlugHint').textContent = protected
+      ? 'Built-in slug ကို ပြောင်း၍မရပါ။'
+      : 'မထည့်ရင် အမည်မှ auto generate လုပ်မည်။';
+    $('#cSort').value = cat ? String(Number(cat.sort_order) || 0) : '50';
+    $('#cActive').checked = cat ? !!Number(cat.active) : true;
+    $('#categoryModal').classList.add('open');
+  }
+
+  const newCategoryBtn = $('#newCategoryBtn');
+  if (newCategoryBtn) {
+    newCategoryBtn.addEventListener('click', () => openCategoryModal(null));
+  }
+  const closeCategoryModal = $('#closeCategoryModal');
+  if (closeCategoryModal) {
+    closeCategoryModal.addEventListener('click', () => $('#categoryModal').classList.remove('open'));
+  }
+  const cancelCategoryModal = $('#cancelCategoryModal');
+  if (cancelCategoryModal) {
+    cancelCategoryModal.addEventListener('click', () => $('#categoryModal').classList.remove('open'));
+  }
+  const categoryModal = $('#categoryModal');
+  if (categoryModal) {
+    categoryModal.addEventListener('click', (e) => {
+      if (e.target === categoryModal) categoryModal.classList.remove('open');
+    });
+  }
+
+  const categoryForm = $('#categoryForm');
+  if (categoryForm) {
+    categoryForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = $('#categoryId').value;
+      const body = {
+        name: $('#cName').value.trim(),
+        active: $('#cActive').checked ? 1 : 0,
+        sort_order: Number($('#cSort').value) || 0,
+      };
+      const slugVal = $('#cSlug').value.trim();
+      if (slugVal && !$('#cSlug').disabled) body.slug = slugVal;
+      try {
+        if (id) {
+          await api('/api/admin/categories/' + id, { method: 'PUT', body: JSON.stringify(body) });
+          toast('အမျိုးအစား သိမ်းပြီး');
+        } else {
+          await api('/api/admin/categories', { method: 'POST', body: JSON.stringify(body) });
+          toast('အမျိုးအစား ထည့်ပြီး');
+        }
+        $('#categoryModal').classList.remove('open');
+        await loadCategories();
+      } catch (err) {
+        toast(err.message || 'မအောင်မြင်ပါ');
+      }
+    });
+  }
+
+  document.addEventListener('click', async (e) => {
+    const editBtn = e.target.closest('[data-edit-category]');
+    if (editBtn) {
+      const id = Number(editBtn.dataset.editCategory);
+      const cat = (loadCategories._cache || []).find((c) => Number(c.id) === id);
+      if (cat) openCategoryModal(cat);
+      return;
+    }
+    const toggleBtn = e.target.closest('[data-toggle-category]');
+    if (toggleBtn) {
+      const id = Number(toggleBtn.dataset.toggleCategory);
+      const cat = (loadCategories._cache || []).find((c) => Number(c.id) === id);
+      if (!cat) return;
+      try {
+        await api('/api/admin/categories/' + id, {
+          method: 'PUT',
+          body: JSON.stringify({
+            name: cat.name,
+            slug: cat.slug,
+            active: Number(toggleBtn.dataset.active) ? 1 : 0,
+            sort_order: Number(cat.sort_order) || 0,
+          }),
+        });
+        await loadCategories();
+        toast('အခြေအနေ ပြောင်းပြီး');
+      } catch (err) {
+        toast(err.message || 'မအောင်မြင်ပါ');
+      }
+      return;
+    }
+    const delBtn = e.target.closest('[data-del-category]');
+    if (delBtn) {
+      if (delBtn.disabled) return;
+      const id = Number(delBtn.dataset.delCategory);
+      const cat = (loadCategories._cache || []).find((c) => Number(c.id) === id);
+      if (!confirm((cat ? cat.name : 'ဤအမျိုးအစား') + ' ကို ဖျက်မည်လား?')) return;
+      try {
+        await api('/api/admin/categories/' + id, { method: 'DELETE', body: '{}' });
+        toast('ဖျက်ပြီး');
+        await loadCategories();
+      } catch (err) {
+        toast(err.message || 'မအောင်မြင်ပါ');
+      }
+    }
   });
 
   // Products
@@ -121,7 +304,7 @@
           if (pct > 0) bannerBits.push('<span class="badge pending">' + pct + '% OFF</span>');
           const bannerCell = bannerBits.length ? bannerBits.join(' ') : '<span class="hint">—</span>';
           const stock = Number.isFinite(Number(p.stock)) ? Number(p.stock) : 0;
-          const catLabel = { blind_box: 'Blind box', accessories: 'Accessories', spin_game: 'Spin wheel · ဂိမ်း', other: 'အခြား' }[p.category] || p.category || 'အခြား';
+          const catLabel = categoryLabel(p.category);
           return `
       <tr>
         <td>${p.image_path ? `<img class="thumb-sm" src="${imgUrl(p.image_path)}" alt="" />` : '—'}</td>
@@ -190,7 +373,8 @@
     const pCat = $('#pCategory');
     if (pCat) {
       const raw = product && product.category ? String(product.category) : '';
-      pCat.value = raw || (pSpinCredit && pSpinCredit.checked ? 'spin_game' : 'blind_box');
+      const want = raw || (pSpinCredit && pSpinCredit.checked ? 'spin_game' : 'blind_box');
+      fillProductCategorySelect(want);
     }
     const isCopy = product && String(product.authenticity || '') === 'copy';
     const authCopy = $('#pAuthCopy');
@@ -236,7 +420,10 @@
     });
   }
 
-  $('#newProductBtn').addEventListener('click', () => openProductModal(null));
+  $('#newProductBtn').addEventListener('click', async () => {
+    try { await loadCategories(); } catch (_) {}
+    openProductModal(null);
+  });
   $('#closeProductModal').addEventListener('click', () =>
     $('#productModal').classList.remove('open')
   );
@@ -339,7 +526,10 @@
     if (edit) {
       const id = Number(edit.dataset.editProduct);
       const p = (loadProducts._cache || []).find((x) => x.id === id);
-      if (p) openProductModal(p);
+      if (p) {
+        try { await loadCategories(); } catch (_) {}
+        openProductModal(p);
+      }
       return;
     }
     const del = e.target.closest('[data-del-product]');

@@ -29,6 +29,7 @@
       <div class="brand" id="adminBrand">MM Shop Admin</div>
       <div class="nav-links">
         <a href="#products" data-tab="products" class="active">ပစ္စည်းများ</a>
+        <a href="#categories" data-tab="categories">အမျိုးအစားများ</a>
         <a href="#spin" data-tab="spin">စပင်ဘီး</a>
         <a href="#orders" data-tab="orders">အော်ဒါများ</a>
         <a href="#chat" data-tab="chat">ကူညီရေး <span class="nav-unread hidden" id="chatNavBadge"></span></a>
@@ -66,6 +67,32 @@
         </div>
       </section>
 
+      <!-- Categories -->
+      <section id="tab-categories" class="tab-panel hidden">
+        <div class="flex-between" style="margin-bottom:1rem">
+          <h1 style="margin:0">အမျိုးအစားများ</h1>
+          <button type="button" class="btn btn-primary" id="newCategoryBtn">+ အမျိုးအစားအသစ်</button>
+        </div>
+        <p class="hint" style="margin-top:0">
+          စတိုးတွင် ပြမည့် category chips ကို ဤနေရာမှ စီမံပါ။
+          <strong>Blind box</strong> နှင့် <strong>Game</strong> (spin_game) ကို ဖျက်၍မရပါ။
+        </p>
+        <div class="admin-card table-wrap">
+          <table class="data" id="categoriesTable">
+            <thead>
+              <tr>
+                <th>အမည်</th>
+                <th>slug</th>
+                <th>အစဉ်</th>
+                <th>ပစ္စည်း</th>
+                <th>အခြေအနေ</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
 
       <!-- Spin wheel -->
       <section id="tab-spin" class="tab-panel hidden">
@@ -263,9 +290,6 @@
           <label for="pCategory">အမျိုးအစား</label>
           <select id="pCategory">
             <option value="blind_box">Blind box</option>
-            <option value="accessories">Accessories</option>
-            <option value="spin_game">Spin wheel · ဂိမ်း</option>
-            <option value="other">အခြား</option>
           </select>
         </div>
         <div class="form-group">
@@ -417,7 +441,44 @@
     </div>
   </div>
 
+  <!-- Category modal -->
+  <div class="overlay" id="categoryModal">
+    <div class="panel" style="max-width:440px">
+      <div class="panel-header">
+        <h2 id="categoryModalTitle">အမျိုးအစား</h2>
+        <button type="button" class="close-x" id="closeCategoryModal">×</button>
+      </div>
+      <form id="categoryForm">
+        <input type="hidden" id="categoryId" />
+        <div class="form-group">
+          <label for="cName">အမည် *</label>
+          <input id="cName" required placeholder="ဥပမာ — Stickers" />
+        </div>
+        <div class="form-group">
+          <label for="cSlug">slug (optional)</label>
+          <input id="cSlug" placeholder="auto from name" autocomplete="off" />
+          <div class="hint" id="cSlugHint">မထည့်ရင် အမည်မှ auto generate လုပ်မည်။ Built-in slug မပြောင်းပါ။</div>
+        </div>
+        <div class="form-group">
+          <label for="cSort">အစဉ် (sort_order)</label>
+          <input id="cSort" type="number" step="1" value="50" />
+        </div>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="cActive" checked />
+            Active (စတိုးတွင် ပြမည်)
+          </label>
+        </div>
+        <div class="row-actions" style="gap:0.5rem">
+          <button type="submit" class="btn btn-primary">သိမ်းမည်</button>
+          <button type="button" class="btn btn-outline" id="cancelCategoryModal">ပယ်ဖျက်</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
+
   <script src="/js/admin.js"></script>
 </body>
 </html>

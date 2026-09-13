@@ -178,6 +178,16 @@ function createTables(database) {
 
     CREATE INDEX IF NOT EXISTS idx_chat_threads_phone ON chat_threads(customer_phone);
     CREATE INDEX IF NOT EXISTS idx_chat_messages_thread ON chat_messages(thread_id);
+
+    CREATE TABLE IF NOT EXISTS categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      slug TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      active INTEGER DEFAULT 1,
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_categories_active_sort ON categories(active, sort_order, id);
   `);
 }
 
@@ -210,11 +220,63 @@ function migrateProductsColumns(database) {
   );
 }
 
-const PRODUCT_CATEGORIES = ['blind_box', 'accessories', 'spin_game', 'other'];
+const BUILTIN_CATEGORIES = [
+  { slug: 'blind_box', name: 'Blind box', sort_order: 10 },
+  { slug: 'accessories', name: 'Accessories', sort_order: 20 },
+  { slug: 'spin_game', name: 'Game', sort_order: 30 },
+  { slug: 'other', name: 'Other', sort_order: 40 },
+];
+const PROTECTED_CATEGORY_SLUGS = new Set(['blind_box', 'spin_game']);
+const KNOWN_FALLBACK_SLUGS = new Set(BUILTIN_CATEGORIES.map((c) => c.slug));
+
+function slugifyCategory(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .replace(/_+/g, '_')
+    .slice(0, 64);
+}
+
+function ensureUniqueCategorySlug(database, baseSlug, excludeId) {
+  let base = slugifyCategory(baseSlug) || 'category';
+  let n = 0;
+  while (n < 10000) {
+    const candidate = n === 0 ? base : base + '_' + n;
+    const row = database.prepare('SELECT id FROM categories WHERE slug = ?').get(candidate);
+    if (!row || (excludeId != null && Number(row.id) === Number(excludeId))) {
+      return candidate;
+    }
+    n += 1;
+  }
+  return base + '_' + Date.now();
+}
+
+function seedCategories(database) {
+  const find = database.prepare('SELECT id FROM categories WHERE slug = ?');
+  const insert = database.prepare(
+    `INSERT INTO categories (slug, name, active, sort_order) VALUES (?, ?, 1, ?)`
+  );
+  for (const cat of BUILTIN_CATEGORIES) {
+    if (!find.get(cat.slug)) {
+      insert.run(cat.slug, cat.name, cat.sort_order);
+    }
+  }
+}
+
+function categorySlugExists(database, slug) {
+  if (!slug) return false;
+  return !!database.prepare('SELECT 1 FROM categories WHERE slug = ?').get(slug);
+}
 
 function normalizeProductCategory(value, fallback = 'other') {
-  const s = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
-  if (PRODUCT_CATEGORIES.includes(s)) return s;
+  const s = slugifyCategory(value);
+  if (!s) return fallback;
+  try {
+    if (db && categorySlugExists(db, s)) return s;
+  } catch (_) {}
+  if (KNOWN_FALLBACK_SLUGS.has(s)) return s;
   return fallback;
 }
 
@@ -993,6 +1055,18 @@ app.get('/api/products', (_req, res) => {
   res.json(products);
 });
 
+app.get('/api/categories', (_req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT id, slug, name, active, sort_order, created_at
+       FROM categories
+       WHERE active = 1
+       ORDER BY sort_order ASC, id ASC`
+    )
+    .all();
+  res.json(rows);
+});
+
 app.get('/api/settings/payment', (_req, res) => {
   const s = getPublicSettings(db);
   res.json({
@@ -1748,6 +1822,124 @@ app.get('/api/admin/me', (req, res) => {
 });
 
 // ========== ADMIN PRODUCTS ==========
+
+app.get('/api/admin/categories', requireAdmin, (_req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT id, slug, name, active, sort_order, created_at,
+        (SELECT COUNT(*) FROM products p WHERE p.category = categories.slug) AS product_count
+       FROM categories
+       ORDER BY sort_order ASC, id ASC`
+    )
+    .all();
+  res.json(rows);
+});
+
+app.post('/api/admin/categories', requireAdmin, (req, res) => {
+  try {
+    const name = String((req.body && req.body.name) || '').trim();
+    if (!name) return res.status(400).json({ error: 'Name is required' });
+    const active = req.body.active === undefined || req.body.active === null
+      ? 1
+      : Number(req.body.active) ? 1 : 0;
+    let sort_order = Number(req.body.sort_order);
+    if (!Number.isFinite(sort_order)) {
+      const maxRow = db.prepare('SELECT MAX(sort_order) AS m FROM categories').get();
+      sort_order = (maxRow && Number.isFinite(Number(maxRow.m)) ? Number(maxRow.m) : 0) + 10;
+    }
+    let slug = slugifyCategory(req.body.slug || name);
+    if (!slug) slug = 'category';
+    slug = ensureUniqueCategorySlug(db, slug, null);
+    const result = db
+      .prepare(
+        `INSERT INTO categories (slug, name, active, sort_order) VALUES (?, ?, ?, ?)`
+      )
+      .run(slug, name, active, sort_order);
+    const row = db.prepare('SELECT * FROM categories WHERE id = ?').get(result.lastInsertRowid);
+    res.status(201).json(row);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to create category' });
+  }
+});
+
+app.put('/api/admin/categories/:id', requireAdmin, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = db.prepare('SELECT * FROM categories WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'Category not found' });
+
+    const name =
+      req.body.name === undefined || req.body.name === null
+        ? existing.name
+        : String(req.body.name).trim();
+    if (!name) return res.status(400).json({ error: 'Name is required' });
+
+    const active =
+      req.body.active === undefined || req.body.active === null
+        ? Number(existing.active) ? 1 : 0
+        : Number(req.body.active) ? 1 : 0;
+
+    let sort_order =
+      req.body.sort_order === undefined || req.body.sort_order === null
+        ? Number(existing.sort_order) || 0
+        : Number(req.body.sort_order);
+    if (!Number.isFinite(sort_order)) sort_order = Number(existing.sort_order) || 0;
+
+    let slug = existing.slug;
+    if (req.body.slug !== undefined && req.body.slug !== null && String(req.body.slug).trim()) {
+      if (PROTECTED_CATEGORY_SLUGS.has(existing.slug)) {
+        // Protected built-ins keep their slug
+        slug = existing.slug;
+      } else {
+        slug = ensureUniqueCategorySlug(db, req.body.slug, id);
+      }
+    }
+
+    const oldSlug = existing.slug;
+    db.prepare(
+      `UPDATE categories SET slug = ?, name = ?, active = ?, sort_order = ? WHERE id = ?`
+    ).run(slug, name, active, sort_order, id);
+
+    if (slug !== oldSlug) {
+      db.prepare(`UPDATE products SET category = ? WHERE category = ?`).run(slug, oldSlug);
+    }
+
+    const row = db.prepare('SELECT * FROM categories WHERE id = ?').get(id);
+    res.json(row);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to update category' });
+  }
+});
+
+app.delete('/api/admin/categories/:id', requireAdmin, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = db.prepare('SELECT * FROM categories WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'Category not found' });
+    if (PROTECTED_CATEGORY_SLUGS.has(existing.slug)) {
+      return res.status(400).json({
+        error: 'Cannot delete built-in category "' + existing.slug + '"',
+      });
+    }
+    const countRow = db
+      .prepare('SELECT COUNT(*) AS c FROM products WHERE category = ?')
+      .get(existing.slug);
+    const count = countRow ? Number(countRow.c) : 0;
+    if (count > 0) {
+      return res.status(409).json({
+        error: 'Category has products; move products to another category first',
+        product_count: count,
+      });
+    }
+    db.prepare('DELETE FROM categories WHERE id = ?').run(id);
+    res.json({ ok: true, deleted: existing });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to delete category' });
+  }
+});
 
 app.get('/api/admin/products', requireAdmin, (_req, res) => {
   const products = db
@@ -2558,6 +2750,7 @@ async function start() {
   migrateSpinPlaysColumns(db);
   migrateSpinPrizesSpecial(db);
   migrateOrdersSpinCreditsLockBackfill(db);
+  seedCategories(db);
   seedBuiltins(db);
   ensureDefaultSettings(db);
 
