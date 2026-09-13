@@ -32,6 +32,7 @@
         <a href="#categories" data-tab="categories">အမျိုးအစားများ</a>
         <a href="#spin" data-tab="spin">စပင်ဘီး</a>
         <a href="#orders" data-tab="orders">အော်ဒါများ</a>
+        <a href="#reports" data-tab="reports">စာရင်း / Reports</a>
         <a href="#chat" data-tab="chat">ကူညီရေး <span class="nav-unread hidden" id="chatNavBadge"></span></a>
         <a href="#settings" data-tab="settings">ဆက်တင်</a>
       </div>
@@ -164,6 +165,49 @@
                 <th></th>
               </tr>
             </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+
+      <!-- Reports -->
+      <section id="tab-reports" class="tab-panel hidden">
+        <h1 style="margin-top:0">စာရင်း / Reports</h1>
+        <p class="hint" style="margin-top:0">
+          Asia/Yangon ပြက္ခဒိန်ဖြင့် စစ်ထုတ်သည်။ Excel ထုတ်ယူခြင်းနှင့် ပရင့်/ကြည့်ရှုခြင်း ရနိုင်သည်။
+        </p>
+        <div class="admin-card" style="max-width:640px">
+          <div class="form-group">
+            <label for="reportType">အမျိုးအစား</label>
+            <select id="reportType">
+              <option value="sales">ရောင်းရင်း (orders)</option>
+              <option value="spin">Spin (plays/wins)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="reportPeriod">ကာလ</label>
+            <select id="reportPeriod">
+              <option value="day">နေ့</option>
+              <option value="month">လ</option>
+              <option value="year">နှစ်</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="reportDate" id="reportDateLabel">ရက်စွဲ</label>
+            <input id="reportDate" type="date" />
+          </div>
+          <div class="row-actions" style="flex-wrap:wrap;gap:0.5rem">
+            <button type="button" class="btn btn-primary" id="reportExcelBtn">Excel ထုတ်မည်</button>
+            <button type="button" class="btn btn-outline" id="reportPrintBtn">ပရင့် / ကြည့်မည်</button>
+            <button type="button" class="btn btn-outline" id="reportPreviewBtn">စာရင်း ပြမည်</button>
+            <button type="button" class="btn btn-danger" id="reportDeleteBtn">ဤကာလ ဖျက်မည်</button>
+          </div>
+          <p class="hint" id="reportMeta" style="margin:0.85rem 0 0"></p>
+        </div>
+        <div class="admin-card table-wrap report-preview-card" id="reportPreviewCard">
+          <table class="data" id="reportPreviewTable">
+            <thead></thead>
             <tbody></tbody>
           </table>
         </div>

@@ -442,6 +442,7 @@
       if (tab === 'chat') startChatPolling();
       else stopChatPolling();
       if (tab === 'categories') loadCategories().catch(() => {});
+      if (tab === 'reports') initReportsTab();
     });
   });
 
@@ -1234,6 +1235,25 @@
           body: JSON.stringify({ password }),
         });
         toast('အော်ဒါအားလုံး ဖျက်ပြီးပါပြီ');
+      } else if (job.type === 'report-sales' || job.type === 'report-spin') {
+        const kind = job.type === 'report-sales' ? 'sales' : 'spin';
+        const q =
+          '?period=' +
+          encodeURIComponent(job.period) +
+          '&date=' +
+          encodeURIComponent(job.date);
+        const result = await api('/api/admin/reports/' + kind + q, {
+          method: 'DELETE',
+          body: JSON.stringify({ password, period: job.period, date: job.date }),
+        });
+        toast(
+          kind === 'sales'
+            ? 'ရောင်းရင်း ' + (result.deleted || 0) + ' ခု ဖျက်ပြီးပါပြီ'
+            : 'Spin ' + (result.deleted || 0) + ' ခု ဖျက်ပြီးပါပြီ'
+        );
+        if (typeof loadReportPreview === 'function') {
+          await loadReportPreview().catch(() => {});
+        }
       } else {
         await api('/api/admin/orders/' + encodeURIComponent(job.orderId), {
           method: 'DELETE',
@@ -2326,6 +2346,264 @@
     if (!btn) return;
     openChatThread(btn.dataset.openChat).catch((err) => toast(err.message));
   });
+
+  // ========== Reports ==========
+  let reportsInited = false;
+  let lastReportPayload = null;
+
+  function yangonTodayYmd() {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Yangon',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+  }
+
+  function getReportFilters() {
+    const type = ($('#reportType') && $('#reportType').value) || 'sales';
+    const period = ($('#reportPeriod') && $('#reportPeriod').value) || 'day';
+    let date = ($('#reportDate') && $('#reportDate').value) || '';
+    return { type, period, date };
+  }
+
+  function reportQueryString() {
+    const { period, date } = getReportFilters();
+    return (
+      '?period=' +
+      encodeURIComponent(period) +
+      '&date=' +
+      encodeURIComponent(date)
+    );
+  }
+
+  function syncReportDateInput() {
+    const period = ($('#reportPeriod') && $('#reportPeriod').value) || 'day';
+    const input = $('#reportDate');
+    const label = $('#reportDateLabel');
+    if (!input) return;
+    const today = yangonTodayYmd();
+    const [y, m] = today.split('-');
+    if (period === 'day') {
+      input.type = 'date';
+      input.removeAttribute('min');
+      input.removeAttribute('max');
+      input.removeAttribute('step');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(input.value)) input.value = today;
+      if (label) label.textContent = 'ရက်စွဲ (နေ့)';
+    } else if (period === 'month') {
+      input.type = 'month';
+      input.removeAttribute('min');
+      input.removeAttribute('max');
+      input.removeAttribute('step');
+      if (!/^\d{4}-\d{2}$/.test(input.value)) input.value = y + '-' + m;
+      if (label) label.textContent = 'လ (YYYY-MM)';
+    } else {
+      input.type = 'number';
+      input.min = '2000';
+      input.max = '2100';
+      input.step = '1';
+      if (!/^\d{4}$/.test(String(input.value))) input.value = y;
+      if (label) label.textContent = 'နှစ် (YYYY)';
+    }
+  }
+
+  function initReportsTab() {
+    syncReportDateInput();
+    if (!reportsInited) {
+      reportsInited = true;
+      const periodEl = $('#reportPeriod');
+      const typeEl = $('#reportType');
+      if (periodEl) {
+        periodEl.addEventListener('change', () => {
+          syncReportDateInput();
+          loadReportPreview().catch(() => {});
+        });
+      }
+      if (typeEl) {
+        typeEl.addEventListener('change', () => {
+          loadReportPreview().catch(() => {});
+        });
+      }
+      const dateEl = $('#reportDate');
+      if (dateEl) {
+        dateEl.addEventListener('change', () => {
+          loadReportPreview().catch(() => {});
+        });
+      }
+      const excelBtn = $('#reportExcelBtn');
+      if (excelBtn) {
+        excelBtn.addEventListener('click', () =>
+          downloadReportExcel().catch((err) => toast(err.message))
+        );
+      }
+      const printBtn = $('#reportPrintBtn');
+      if (printBtn) {
+        printBtn.addEventListener('click', () => openReportPrint());
+      }
+      const previewBtn = $('#reportPreviewBtn');
+      if (previewBtn) {
+        previewBtn.addEventListener('click', () => {
+          loadReportPreview().catch((err) => toast(err.message));
+        });
+      }
+      const delBtn = $('#reportDeleteBtn');
+      if (delBtn) {
+        delBtn.addEventListener('click', () => confirmReportDelete());
+      }
+    }
+    loadReportPreview().catch(() => {});
+  }
+
+  async function loadReportPreview() {
+    syncReportDateInput();
+    const filters = getReportFilters();
+    const q = reportQueryString();
+    const data = await api('/api/admin/reports/' + filters.type + q);
+    lastReportPayload = data;
+    const meta = $('#reportMeta');
+    const periodLabel =
+      filters.period === 'day' ? 'နေ့' : filters.period === 'month' ? 'လ' : 'နှစ်';
+    const typeLabel = filters.type === 'sales' ? 'ရောင်းရင်း' : 'Spin';
+    if (meta) {
+      meta.textContent =
+        typeLabel +
+        ' — ကာလ ' +
+        periodLabel +
+        ' / ' +
+        filters.date +
+        ' (Asia/Yangon) — ' +
+        (data.count || 0) +
+        ' ခု';
+    }
+    const thead = $('#reportPreviewTable thead');
+    const tbody = $('#reportPreviewTable tbody');
+    if (!thead || !tbody) return data;
+    if (filters.type === 'sales') {
+      thead.innerHTML =
+        '<tr>' +
+        '<th>Order ID</th><th>အချိန်</th><th>အမည်</th><th>ဖုန်း</th><th>လိပ်စာ</th>' +
+        '<th>ပစ္စည်းများ</th><th>စုစုပေါင်း</th><th>အခြေအနေ</th>' +
+        '<th>Spin</th><th>ပြီး</th><th>စလစ်</th>' +
+        '</tr>';
+      tbody.innerHTML =
+        (data.rows || [])
+          .map(function (r) {
+            return (
+              '<tr>' +
+              '<td>' + escapeHtml(r.order_id) + '</td>' +
+              '<td>' + escapeHtml(r.created_at) + '</td>' +
+              '<td>' + escapeHtml(r.customer_name) + '</td>' +
+              '<td>' + escapeHtml(r.phone) + '</td>' +
+              '<td>' + escapeHtml(r.address) + '</td>' +
+              '<td>' + escapeHtml(r.items_summary) + '</td>' +
+              '<td>' + formatMMK(r.total_mmk) + '</td>' +
+              '<td>' + escapeHtml(r.status_label || r.status) + '</td>' +
+              '<td>' + (Number(r.spin_credits) || 0) + '</td>' +
+              '<td>' + (Number(r.spin_completed) === 1 ? 'ဟုတ်' : '—') + '</td>' +
+              '<td>' + escapeHtml(r.slip) + '</td>' +
+              '</tr>'
+            );
+          })
+          .join('') ||
+        '<tr><td colspan="11" class="hint">မှတ်တမ်း မရှိပါ</td></tr>';
+    } else {
+      thead.innerHTML =
+        '<tr>' +
+        '<th>အချိန်</th><th>Order ID</th><th>ဆု</th><th>ပစ္စည်း</th>' +
+        '<th>အမည်</th><th>ဖုန်း</th><th>လိပ်စာ</th><th>ကျန်အခွင့်</th>' +
+        '</tr>';
+      tbody.innerHTML =
+        (data.rows || [])
+          .map(function (r) {
+            return (
+              '<tr>' +
+              '<td>' + escapeHtml(r.created_at) + '</td>' +
+              '<td>' + escapeHtml(r.order_id) + '</td>' +
+              '<td>' + escapeHtml(r.prize_name) + '</td>' +
+              '<td>' + escapeHtml(r.product_name || '—') + '</td>' +
+              '<td>' + escapeHtml(r.customer_name) + '</td>' +
+              '<td>' + escapeHtml(r.phone) + '</td>' +
+              '<td>' + escapeHtml(r.address) + '</td>' +
+              '<td>' + (Number(r.spin_credits) || 0) + '</td>' +
+              '</tr>'
+            );
+          })
+          .join('') ||
+        '<tr><td colspan="8" class="hint">မှတ်တမ်း မရှိပါ</td></tr>';
+    }
+    return data;
+  }
+
+  async function downloadReportExcel() {
+    syncReportDateInput();
+    const type = getReportFilters().type;
+    const q = reportQueryString();
+    const url = '/api/admin/reports/' + type + '.xlsx' + q;
+    const res = await fetch(url, { credentials: 'same-origin' });
+    if (!res.ok) {
+      const data = await res.json().catch(function () { return {}; });
+      throw new Error(data.error || 'Excel ထုတ်မရပါ');
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get('Content-Disposition') || '';
+    const m = /filename="([^"]+)"/.exec(cd);
+    const filename = (m && m[1]) || 'report.xlsx';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+    toast('Excel ထုတ်ပြီးပါပြီ');
+  }
+
+  function openReportPrint() {
+    syncReportDateInput();
+    const type = getReportFilters().type;
+    const q =
+      reportQueryString() +
+      '&type=' +
+      encodeURIComponent(type) +
+      '&autoprint=1';
+    window.open('/api/admin/reports/print' + q, '_blank', 'noopener');
+  }
+
+  function confirmReportDelete() {
+    syncReportDateInput();
+    const filters = getReportFilters();
+    const periodLabel =
+      filters.period === 'day' ? 'နေ့' : filters.period === 'month' ? 'လ' : 'နှစ်';
+    const count = (lastReportPayload && lastReportPayload.count) || 0;
+    if (filters.type === 'sales') {
+      openPasswordConfirm({
+        title: 'ဤကာလ ရောင်းရင်း ဖျက်မည်',
+        message:
+          'ကာလ ' +
+          periodLabel +
+          ' / ' +
+          filters.date +
+          ' ၏ အော်ဒါများ (order_items, slip, ဆက်စပ် spin_plays အပါအဝင်) ကို ဖျက်မည်။ ပြန်မရပါ။ လက်ရှိ ပြထားသော အရေအတွက်: ' +
+          count +
+          '။ အက်ဒမင် စကားဝှက် ထည့်ပါ။',
+        pending: { type: 'report-sales', period: filters.period, date: filters.date },
+      });
+    } else {
+      openPasswordConfirm({
+        title: 'ဤကာလ Spin ဖျက်မည်',
+        message:
+          'ကာလ ' +
+          periodLabel +
+          ' / ' +
+          filters.date +
+          ' ၏ spin_plays မှတ်တမ်းများသာ ဖျက်မည် (အော်ဒါ မဖျက်ပါ)။ ပြန်မရပါ။ လက်ရှိ ပြထားသော အရေအတွက်: ' +
+          count +
+          '။ အက်ဒမင် စကားဝှက် ထည့်ပါ။',
+        pending: { type: 'report-spin', period: filters.period, date: filters.date },
+      });
+    }
+  }
 
   checkAuth().catch(() => showLogin());
 })();

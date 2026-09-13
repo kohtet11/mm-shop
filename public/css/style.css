@@ -1576,3 +1576,36 @@ a.cart-btn {
   flex: 1;
   min-width: 120px;
 }
+
+
+/* Admin reports */
+.report-preview-card { margin-top: 1rem; }
+@media print {
+  body.admin-body .login-wrap,
+  body.admin-body .admin-nav,
+  body.admin-body .overlay,
+  body.admin-body #toast,
+  body.admin-body .tab-panel.hidden,
+  body.admin-printing .admin-nav,
+  body.admin-printing .row-actions,
+  body.admin-printing #reportExcelBtn,
+  body.admin-printing #reportPrintBtn,
+  body.admin-printing #reportPreviewBtn,
+  body.admin-printing #reportDeleteBtn {
+    display: none !important;
+  }
+  body.admin-printing .admin-shell {
+    display: block !important;
+  }
+  body.admin-printing .admin-main {
+    padding: 0 !important;
+  }
+  body.admin-printing #tab-reports {
+    display: block !important;
+  }
+  body.admin-printing .admin-card:not(.report-preview-card) {
+    border: none;
+    box-shadow: none;
+    padding: 0;
+  }
+}

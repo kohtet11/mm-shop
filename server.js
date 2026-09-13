@@ -8,6 +8,7 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
+const ExcelJS = require('exceljs');
 
 const PORT = Number(process.env.PORT) || 3847;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
@@ -2146,6 +2147,260 @@ app.patch('/api/admin/products/:id/stock', requireAdmin, (req, res) => {
   }
 });
 
+
+// ========== ADMIN REPORTS (Asia/Yangon calendar) ==========
+// SQLite datetime('now') stores UTC. Filter by converting to Yangon (+06:30).
+const YANGON_SQL_MODS = "'+6 hours', '+30 minutes'";
+
+const REPORT_STATUS_LABEL = {
+  pending: 'စောင့်ဆိုင်း',
+  paid_confirmed: 'ငွေအတည်ပြု',
+  shipped: 'ပို့ပြီး',
+  cancelled: 'ပယ်ဖျက်',
+};
+
+function yangonParts(d = new Date()) {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Yangon',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  // en-CA => YYYY-MM-DD
+  const ymd = fmt.format(d);
+  const [y, m, day] = ymd.split('-');
+  return { ymd, y, m, day, year: y, month: `${y}-${m}` };
+}
+
+function parseReportPeriodDate(query) {
+  const period = String((query && query.period) || 'day').toLowerCase();
+  if (!['day', 'month', 'year'].includes(period)) {
+    return { error: 'period သည် day | month | year ဖြစ်ရမည်' };
+  }
+  const now = yangonParts();
+  let date = String((query && query.date) || '').trim();
+  if (!date) {
+    if (period === 'day') date = now.ymd;
+    else if (period === 'month') date = now.month;
+    else date = now.year;
+  }
+  if (period === 'day' && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return { error: 'date သည် YYYY-MM-DD ဖြစ်ရမည်' };
+  }
+  if (period === 'month' && !/^\d{4}-\d{2}$/.test(date)) {
+    return { error: 'date သည် YYYY-MM ဖြစ်ရမည်' };
+  }
+  if (period === 'year' && !/^\d{4}$/.test(date)) {
+    return { error: 'date သည် YYYY ဖြစ်ရမည်' };
+  }
+  let whereSql;
+  if (period === 'day') {
+    whereSql = `date(COL, ${YANGON_SQL_MODS}) = ?`;
+  } else if (period === 'month') {
+    whereSql = `strftime('%Y-%m', COL, ${YANGON_SQL_MODS}) = ?`;
+  } else {
+    whereSql = `strftime('%Y', COL, ${YANGON_SQL_MODS}) = ?`;
+  }
+  const periodLabel =
+    period === 'day' ? 'နေ့' : period === 'month' ? 'လ' : 'နှစ်';
+  return { period, date, whereSql, periodLabel };
+}
+
+function itemsSummary(items) {
+  if (!items || !items.length) return '';
+  return items
+    .map((it) => `${it.product_name || 'item'} x${Number(it.quantity) || 0}`)
+    .join(', ');
+}
+
+function querySalesReportRows(database, periodInfo) {
+  const where = periodInfo.whereSql.replace(/COL/g, 'o.created_at');
+  const orders = database
+    .prepare(
+      `SELECT o.* FROM orders o
+       WHERE ${where}
+       ORDER BY datetime(o.created_at) DESC, o.id DESC`
+    )
+    .all(periodInfo.date);
+  return orders.map((o) => {
+    const items = database
+      .prepare('SELECT * FROM order_items WHERE order_id = ?')
+      .all(o.order_id);
+    return {
+      order_id: o.order_id,
+      created_at: o.created_at,
+      customer_name: o.customer_name || '',
+      phone: o.phone || '',
+      address: o.address || '',
+      items_summary: itemsSummary(items),
+      total_mmk: Number(o.total_mmk) || 0,
+      status: o.status || '',
+      status_label: REPORT_STATUS_LABEL[o.status] || o.status || '',
+      spin_credits: Number(o.spin_credits) || 0,
+      spin_completed: Number(o.spin_completed) === 1 ? 1 : 0,
+      slip: o.slip_path && String(o.slip_path).trim() ? 'ရှိ' : 'မရှိ',
+      slip_yes: !!(o.slip_path && String(o.slip_path).trim()),
+    };
+  });
+}
+
+function querySpinReportRows(database, periodInfo) {
+  const where = periodInfo.whereSql.replace(/COL/g, 'sp.created_at');
+  const rows = database
+    .prepare(
+      `SELECT
+         sp.id,
+         sp.order_id,
+         sp.prize_id,
+         sp.prize_name,
+         sp.created_at,
+         o.customer_name,
+         o.phone,
+         o.address,
+         o.spin_credits,
+         COALESCE(spr.product_id, NULL) AS product_id,
+         p.name AS product_name
+       FROM spin_plays sp
+       LEFT JOIN orders o ON o.order_id = sp.order_id
+       LEFT JOIN spin_prizes spr ON spr.id = sp.prize_id
+       LEFT JOIN products p ON p.id = spr.product_id
+       WHERE ${where}
+       ORDER BY datetime(sp.created_at) DESC, sp.id DESC`
+    )
+    .all(periodInfo.date);
+  return rows.map((r) => ({
+    id: r.id,
+    created_at: r.created_at,
+    order_id: r.order_id || '',
+    prize_name: r.prize_name || '',
+    product_name: r.product_name || '',
+    customer_name: r.customer_name || '',
+    phone: r.phone || '',
+    address: r.address || '',
+    spin_credits: Number(r.spin_credits) || 0,
+  }));
+}
+
+function reportFilename(kind, periodInfo) {
+  return `glow-gear-${kind}-${periodInfo.period}-${periodInfo.date}.xlsx`;
+}
+
+async function buildSalesWorkbook(rows, periodInfo) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'Glow Gear';
+  const ws = wb.addWorksheet('ရောင်းရင်း');
+  ws.columns = [
+    { header: 'Order ID', key: 'order_id', width: 18 },
+    { header: 'Created at', key: 'created_at', width: 20 },
+    { header: 'Customer', key: 'customer_name', width: 18 },
+    { header: 'Phone', key: 'phone', width: 14 },
+    { header: 'Address', key: 'address', width: 28 },
+    { header: 'Items', key: 'items_summary', width: 36 },
+    { header: 'Total MMK', key: 'total_mmk', width: 12 },
+    { header: 'Status', key: 'status_label', width: 14 },
+    { header: 'Spin credits', key: 'spin_credits', width: 12 },
+    { header: 'Spin completed', key: 'spin_completed', width: 14 },
+    { header: 'Slip', key: 'slip', width: 8 },
+  ];
+  ws.getRow(1).font = { bold: true };
+  for (const r of rows) ws.addRow(r);
+  ws.addRow([]);
+  ws.addRow({
+    order_id: 'Period',
+    created_at: `${periodInfo.periodLabel} / ${periodInfo.date} (Asia/Yangon)`,
+  });
+  return wb;
+}
+
+async function buildSpinWorkbook(rows, periodInfo) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'Glow Gear';
+  const ws = wb.addWorksheet('Spin');
+  ws.columns = [
+    { header: 'Time', key: 'created_at', width: 20 },
+    { header: 'Order ID', key: 'order_id', width: 18 },
+    { header: 'Prize', key: 'prize_name', width: 22 },
+    { header: 'Product', key: 'product_name', width: 22 },
+    { header: 'Customer', key: 'customer_name', width: 18 },
+    { header: 'Phone', key: 'phone', width: 14 },
+    { header: 'Address', key: 'address', width: 28 },
+    { header: 'Remaining credits', key: 'spin_credits', width: 16 },
+  ];
+  ws.getRow(1).font = { bold: true };
+  for (const r of rows) ws.addRow(r);
+  ws.addRow([]);
+  ws.addRow({
+    created_at: 'Period',
+    order_id: `${periodInfo.periodLabel} / ${periodInfo.date} (Asia/Yangon)`,
+  });
+  return wb;
+}
+
+function escapeHtmlReport(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function renderReportPrintHtml({ title, subtitle, headers, bodyRows }) {
+  const th = headers.map((h) => `<th>${escapeHtmlReport(h)}</th>`).join('');
+  const trs = bodyRows.length
+    ? bodyRows
+        .map(
+          (cells) =>
+            '<tr>' +
+            cells.map((c) => `<td>${escapeHtmlReport(c)}</td>`).join('') +
+            '</tr>'
+        )
+        .join('\n')
+    : `<tr><td colspan="${headers.length}">မှတ်တမ်း မရှိပါ</td></tr>`;
+  return `<!DOCTYPE html>
+<html lang="my">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtmlReport(title)}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1.25rem; color: #111; }
+    h1 { font-size: 1.25rem; margin: 0 0 0.35rem; }
+    .meta { color: #555; margin-bottom: 1rem; font-size: 0.95rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th, td { border: 1px solid #ccc; padding: 0.4rem 0.45rem; text-align: left; vertical-align: top; }
+    th { background: #f3f4f6; }
+    .toolbar { margin-bottom: 1rem; }
+    .toolbar button {
+      background: #0d9488; color: #fff; border: 0; padding: 0.5rem 1rem;
+      border-radius: 8px; cursor: pointer; font-size: 0.95rem;
+    }
+    @media print {
+      .toolbar { display: none !important; }
+      body { margin: 0.4cm; }
+      th { background: #eee !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button type="button" onclick="window.print()">ပရင့်မည်</button>
+  </div>
+  <h1>${escapeHtmlReport(title)}</h1>
+  <div class="meta">${escapeHtmlReport(subtitle)}</div>
+  <table>
+    <thead><tr>${th}</tr></thead>
+    <tbody>${trs}</tbody>
+  </table>
+  <script>
+    // optional auto-print when ?autoprint=1
+    if (/[?&]autoprint=1\\b/.test(location.search)) {
+      window.addEventListener('load', () => setTimeout(() => window.print(), 200));
+    }
+  </script>
+</body>
+</html>`;
+}
+
 // ========== ADMIN ORDERS ==========
 
 app.get('/api/admin/orders', requireAdmin, (_req, res) => {
@@ -2304,6 +2559,213 @@ app.delete('/api/admin/orders/:orderId', requireAdmin, (req, res) => {
     const deleted = deleteOrderById(db, req.params.orderId);
     if (!deleted) return res.status(404).json({ error: 'Not found' });
     res.json({ ok: true, order_id: deleted.order_id });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
+
+// ========== ADMIN REPORTS API ==========
+
+app.get('/api/admin/reports/sales', requireAdmin, (req, res) => {
+  try {
+    const info = parseReportPeriodDate(req.query);
+    if (info.error) return res.status(400).json({ error: info.error });
+    const rows = querySalesReportRows(db, info);
+    res.json({
+      type: 'sales',
+      period: info.period,
+      date: info.date,
+      timezone: 'Asia/Yangon',
+      count: rows.length,
+      rows,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/admin/reports/spin', requireAdmin, (req, res) => {
+  try {
+    const info = parseReportPeriodDate(req.query);
+    if (info.error) return res.status(400).json({ error: info.error });
+    const rows = querySpinReportRows(db, info);
+    res.json({
+      type: 'spin',
+      period: info.period,
+      date: info.date,
+      timezone: 'Asia/Yangon',
+      count: rows.length,
+      rows,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/admin/reports/sales.xlsx', requireAdmin, async (req, res) => {
+  try {
+    const info = parseReportPeriodDate(req.query);
+    if (info.error) return res.status(400).json({ error: info.error });
+    const rows = querySalesReportRows(db, info);
+    const wb = await buildSalesWorkbook(rows, info);
+    const buf = await wb.xlsx.writeBuffer();
+    const name = reportFilename('sales', info);
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
+    res.send(Buffer.from(buf));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/admin/reports/spin.xlsx', requireAdmin, async (req, res) => {
+  try {
+    const info = parseReportPeriodDate(req.query);
+    if (info.error) return res.status(400).json({ error: info.error });
+    const rows = querySpinReportRows(db, info);
+    const wb = await buildSpinWorkbook(rows, info);
+    const buf = await wb.xlsx.writeBuffer();
+    const name = reportFilename('spin', info);
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
+    res.send(Buffer.from(buf));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/admin/reports/print', requireAdmin, (req, res) => {
+  try {
+    const type = String(req.query.type || 'sales').toLowerCase();
+    if (!['sales', 'spin'].includes(type)) {
+      return res.status(400).json({ error: 'type သည် sales | spin ဖြစ်ရမည်' });
+    }
+    const info = parseReportPeriodDate(req.query);
+    if (info.error) return res.status(400).json({ error: info.error });
+    const subtitle = `ကာလ: ${info.periodLabel} — ${info.date} (Asia/Yangon)`;
+    let html;
+    if (type === 'sales') {
+      const rows = querySalesReportRows(db, info);
+      html = renderReportPrintHtml({
+        title: 'Glow Gear — ရောင်းရင်း စာရင်း',
+        subtitle: subtitle + ` — စုစုပေါင်း ${rows.length} ခု`,
+        headers: [
+          'Order ID',
+          'အချိန်',
+          'အမည်',
+          'ဖုန်း',
+          'လိပ်စာ',
+          'ပစ္စည်းများ',
+          'စုစုပေါင်း',
+          'အခြေအနေ',
+          'Spin credits',
+          'Spin ပြီး',
+          'စလစ်',
+        ],
+        bodyRows: rows.map((r) => [
+          r.order_id,
+          r.created_at,
+          r.customer_name,
+          r.phone,
+          r.address,
+          r.items_summary,
+          r.total_mmk,
+          r.status_label,
+          r.spin_credits,
+          r.spin_completed ? 'ဟုတ်' : 'မဟုတ်',
+          r.slip,
+        ]),
+      });
+    } else {
+      const rows = querySpinReportRows(db, info);
+      html = renderReportPrintHtml({
+        title: 'Glow Gear — Spin စာရင်း',
+        subtitle: subtitle + ` — စုစုပေါင်း ${rows.length} ခု`,
+        headers: [
+          'အချိန်',
+          'Order ID',
+          'ဆုအမည်',
+          'ပစ္စည်း',
+          'အမည်',
+          'ဖုန်း',
+          'လိပ်စာ',
+          'ကျန်အခွင့်',
+        ],
+        bodyRows: rows.map((r) => [
+          r.created_at,
+          r.order_id,
+          r.prize_name,
+          r.product_name,
+          r.customer_name,
+          r.phone,
+          r.address,
+          r.spin_credits,
+        ]),
+      });
+    }
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.delete('/api/admin/reports/sales', requireAdmin, (req, res) => {
+  try {
+    if (requirePasswordBody(req, res) === null) return;
+    const info = parseReportPeriodDate({ ...req.query, ...(req.body || {}) });
+    if (info.error) return res.status(400).json({ error: info.error });
+    const where = info.whereSql.replace(/COL/g, 'created_at');
+    const orders = db
+      .prepare(`SELECT order_id FROM orders WHERE ${where}`)
+      .all(info.date);
+    let deleted = 0;
+    for (const o of orders) {
+      if (deleteOrderById(db, o.order_id)) deleted += 1;
+    }
+    res.json({
+      ok: true,
+      type: 'sales',
+      period: info.period,
+      date: info.date,
+      deleted,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.delete('/api/admin/reports/spin', requireAdmin, (req, res) => {
+  try {
+    if (requirePasswordBody(req, res) === null) return;
+    const info = parseReportPeriodDate({ ...req.query, ...(req.body || {}) });
+    if (info.error) return res.status(400).json({ error: info.error });
+    const where = info.whereSql.replace(/COL/g, 'created_at');
+    const result = db
+      .prepare(`DELETE FROM spin_plays WHERE ${where}`)
+      .run(info.date);
+    res.json({
+      ok: true,
+      type: 'spin',
+      period: info.period,
+      date: info.date,
+      deleted: result.changes || 0,
+    });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Server error' });
