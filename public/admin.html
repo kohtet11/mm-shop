@@ -258,7 +258,7 @@
             စတိုး promo carousel တွင် Game slide နှင့် product banner များနှင့်အတူ ပြမည့် ကြေငြာပုံများ။
             ပုံသီးသန့်သာ — နှိပ်လျှင် action မရှိပါ။
           </p>
-          <div class="frame-hint">Banner 16:9 အကြံပြု — တင်မီ center-crop လုပ်မည်</div>
+          <div class="frame-hint">Banner 16:9 — တင်မီ frame ထဲ ဆွဲရွှေ့၍ ညှိပါ</div>
           <div id="bannerImagePreviewWrap" class="frame-preview frame-preview-banner" style="margin-bottom:0.85rem">
             <div class="frame-preview-empty" id="bannerImagePreviewEmpty">Banner preview (16:9)</div>
             <img id="bannerImagePreview" class="hidden" alt="banner preview" />
@@ -350,7 +350,7 @@
         <div class="form-group">
           <label for="pImage">ပုံ</label>
           <input id="pImage" type="file" accept="image/*" />
-          <div class="frame-hint">ကုန်ပုံ 1:1 အကြံပြု — စတိုးတွင် စတုရန်း frame ဖြင့် ပြမည်</div>
+          <div class="frame-hint">ကုန်ပုံ 1:1 — တင်မီ frame ထဲ ဆွဲရွှေ့၍ ညှိပါ · စတိုးတွင် စတုရန်း</div>
           <div id="pImagePreviewWrap" class="frame-preview frame-preview-square">
             <div class="frame-preview-empty" id="pImagePreviewEmpty">ပုံရွေးပါ / Preview</div>
             <img id="pImagePreview" class="hidden" alt="product preview" />
@@ -554,6 +554,33 @@
           <button type="button" class="btn btn-outline" id="cancelCategoryModal">ပယ်ဖျက်</button>
         </div>
       </form>
+    </div>
+  </div>
+
+
+  <!-- Image pan/adjust modal (product 1:1 / banner 16:9) -->
+  <div class="overlay image-adjust-overlay" id="imageAdjustModal">
+    <div class="panel image-adjust-panel">
+      <div class="panel-header">
+        <h2 id="imageAdjustTitle">ပုံညှိရန်</h2>
+        <button type="button" class="close-x" id="imageAdjustClose" aria-label="ပိတ်မည်">×</button>
+      </div>
+      <p class="image-adjust-hint" id="imageAdjustHint">frame ထဲမှာ ဆွဲရွှေ့၍ ညှိပါ</p>
+      <div class="image-adjust-stage-wrap">
+        <div class="image-adjust-stage" id="imageAdjustStage">
+          <img id="imageAdjustImg" alt="" draggable="false" />
+          <div class="image-adjust-frame" id="imageAdjustFrame" aria-hidden="true"></div>
+        </div>
+      </div>
+      <div class="image-adjust-zoom-row">
+        <label for="imageAdjustZoom">Zoom</label>
+        <input type="range" id="imageAdjustZoom" min="100" max="300" value="100" step="1" />
+        <button type="button" class="btn btn-sm btn-outline" id="imageAdjustReset">Reset</button>
+      </div>
+      <div class="row-actions image-adjust-actions" style="gap:0.5rem;margin-top:0.85rem">
+        <button type="button" class="btn btn-primary" id="imageAdjustConfirm">အတည်ပြု</button>
+        <button type="button" class="btn btn-outline" id="imageAdjustCancel">ပယ်ဖျက်</button>
+      </div>
     </div>
   </div>
 

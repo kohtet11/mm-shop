@@ -34,67 +34,310 @@
     return path.startsWith('/') ? path : '/uploads/' + path;
   }
 
-  /** Center-crop image File to target W:H ratio via canvas (JPEG). */
+  function clamp(n, min, max) {
+    return Math.min(max, Math.max(min, n));
+  }
+
+  /** Export a source crop rect from an HTMLImageElement to a File (JPEG/PNG). */
+  function canvasCropToFile(img, sx, sy, sw, sh, file, maxEdge = 1600) {
+    return new Promise((resolve, reject) => {
+      try {
+        sx = Math.max(0, sx);
+        sy = Math.max(0, sy);
+        const srcW = img.naturalWidth || img.width;
+        const srcH = img.naturalHeight || img.height;
+        sw = Math.min(sw, srcW - sx);
+        sh = Math.min(sh, srcH - sy);
+        if (sw < 1 || sh < 1) throw new Error('ပုံ crop မရပါ');
+        let outW = Math.round(sw);
+        let outH = Math.round(sh);
+        const longEdge = Math.max(outW, outH);
+        if (longEdge > maxEdge) {
+          const scale = maxEdge / longEdge;
+          outW = Math.max(1, Math.round(outW * scale));
+          outH = Math.max(1, Math.round(outH * scale));
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = outW;
+        canvas.height = outH;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+        const preferPng = /^image\/png$/i.test(file.type || '');
+        const mime = preferPng ? 'image/png' : 'image/jpeg';
+        const ext = preferPng ? '.png' : '.jpg';
+        const base = String(file.name || 'image').replace(/\.[^.]+$/, '') || 'image';
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              reject(new Error('ပုံ crop မရပါ'));
+              return;
+            }
+            resolve(new File([blob], base + ext, { type: mime }));
+          },
+          mime,
+          preferPng ? undefined : 0.9
+        );
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  /**
+   * Open fixed-frame pan/zoom adjust modal, then canvas-crop visible area.
+   * Resolves cropped File, or null if cancelled.
+   */
   function cropImageToRatio(file, ratioW, ratioH, maxEdge = 1600) {
     return new Promise((resolve, reject) => {
       if (!file || !/^image\//.test(file.type || '')) {
         reject(new Error('ပုံဖိုင် မဟုတ်ပါ'));
         return;
       }
-      const img = new Image();
+      const modal = $('#imageAdjustModal');
+      const stage = $('#imageAdjustStage');
+      const imgEl = $('#imageAdjustImg');
+      const zoomInput = $('#imageAdjustZoom');
+      if (!modal || !stage || !imgEl || !zoomInput) {
+        reject(new Error('ပုံညှိ UI မရှိပါ'));
+        return;
+      }
+
       const url = URL.createObjectURL(file);
-      img.onload = () => {
+      const img = new Image();
+      let settled = false;
+      let naturalW = 0;
+      let naturalH = 0;
+      let coverScale = 1;
+      let zoom = 1;
+      let offsetX = 0;
+      let offsetY = 0;
+      let dragging = false;
+      let lastX = 0;
+      let lastY = 0;
+      let pinchStartDist = 0;
+      let pinchStartZoom = 1;
+
+      const isSquare = Math.abs(ratioW / ratioH - 1) < 0.01;
+      stage.classList.toggle('is-square', isSquare);
+      stage.classList.toggle('is-banner', !isSquare);
+      $('#imageAdjustTitle').textContent = isSquare ? 'ကုန်ပုံ ညှိရန် (1:1)' : 'Banner ညှိရန် (16:9)';
+      $('#imageAdjustHint').textContent = 'frame ထဲမှာ ဆွဲရွှေ့၍ ညှိပါ';
+      zoomInput.value = '100';
+
+      function cleanup() {
+        modal.classList.remove('open');
+        stage.classList.remove('is-dragging');
         URL.revokeObjectURL(url);
-        try {
-          const srcW = img.naturalWidth || img.width;
-          const srcH = img.naturalHeight || img.height;
-          if (!srcW || !srcH) throw new Error('ပုံဖတ်မရပါ');
-          const targetRatio = ratioW / ratioH;
-          const srcRatio = srcW / srcH;
-          let sx = 0;
-          let sy = 0;
-          let sw = srcW;
-          let sh = srcH;
-          if (srcRatio > targetRatio) {
-            sw = Math.round(srcH * targetRatio);
-            sx = Math.round((srcW - sw) / 2);
-          } else if (srcRatio < targetRatio) {
-            sh = Math.round(srcW / targetRatio);
-            sy = Math.round((srcH - sh) / 2);
-          }
-          let outW = sw;
-          let outH = sh;
-          const longEdge = Math.max(outW, outH);
-          if (longEdge > maxEdge) {
-            const scale = maxEdge / longEdge;
-            outW = Math.max(1, Math.round(outW * scale));
-            outH = Math.max(1, Math.round(outH * scale));
-          }
-          const canvas = document.createElement('canvas');
-          canvas.width = outW;
-          canvas.height = outH;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
-          const base = String(file.name || 'image').replace(/\.[^.]+$/, '') || 'image';
-          canvas.toBlob(
-            (blob) => {
-              if (!blob) {
-                reject(new Error('ပုံ crop မရပါ'));
-                return;
-              }
-              resolve(new File([blob], base + '.jpg', { type: 'image/jpeg' }));
-            },
-            'image/jpeg',
-            0.9
-          );
-        } catch (err) {
-          reject(err);
+        imgEl.removeAttribute('src');
+        stage.removeEventListener('pointerdown', onPointerDown);
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+        window.removeEventListener('pointercancel', onPointerUp);
+        stage.removeEventListener('wheel', onWheel);
+        stage.removeEventListener('touchstart', onTouchStart, { passive: false });
+        stage.removeEventListener('touchmove', onTouchMove, { passive: false });
+        stage.removeEventListener('touchend', onTouchEnd);
+        $('#imageAdjustConfirm').removeEventListener('click', onConfirm);
+        $('#imageAdjustCancel').removeEventListener('click', onCancel);
+        $('#imageAdjustClose').removeEventListener('click', onCancel);
+        $('#imageAdjustReset').removeEventListener('click', onReset);
+        zoomInput.removeEventListener('input', onZoomInput);
+        modal.removeEventListener('click', onBackdrop);
+        window.removeEventListener('keydown', onKey);
+      }
+
+      function finish(value) {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(value);
+      }
+
+      function fail(err) {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(err);
+      }
+
+      function maxOffsets() {
+        const frameW = stage.clientWidth;
+        const frameH = stage.clientHeight;
+        const dispW = naturalW * coverScale * zoom;
+        const dispH = naturalH * coverScale * zoom;
+        return {
+          frameW,
+          frameH,
+          dispW,
+          dispH,
+          maxOx: Math.max(0, (dispW - frameW) / 2),
+          maxOy: Math.max(0, (dispH - frameH) / 2),
+        };
+      }
+
+      function applyTransform() {
+        const m = maxOffsets();
+        offsetX = clamp(offsetX, -m.maxOx, m.maxOx);
+        offsetY = clamp(offsetY, -m.maxOy, m.maxOy);
+        const left = m.frameW / 2 + offsetX - m.dispW / 2;
+        const top = m.frameH / 2 + offsetY - m.dispH / 2;
+        imgEl.style.width = m.dispW + 'px';
+        imgEl.style.height = m.dispH + 'px';
+        imgEl.style.transform = 'translate(' + left + 'px,' + top + 'px)';
+      }
+
+      function setZoom(next, keepCenter) {
+        const prev = zoom;
+        zoom = clamp(next, 1, 3);
+        zoomInput.value = String(Math.round(zoom * 100));
+        if (keepCenter && prev > 0) {
+          const ratio = zoom / prev;
+          offsetX *= ratio;
+          offsetY *= ratio;
         }
+        applyTransform();
+      }
+
+      function onPointerDown(e) {
+        if (e.pointerType === 'touch' && e.target.closest('.image-adjust-stage') && e.isPrimary === false) return;
+        if (e.button != null && e.button !== 0) return;
+        dragging = true;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        stage.classList.add('is-dragging');
+        try { stage.setPointerCapture(e.pointerId); } catch (_) {}
+      }
+
+      function onPointerMove(e) {
+        if (!dragging) return;
+        const dx = e.clientX - lastX;
+        const dy = e.clientY - lastY;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        offsetX += dx;
+        offsetY += dy;
+        applyTransform();
+      }
+
+      function onPointerUp() {
+        dragging = false;
+        stage.classList.remove('is-dragging');
+      }
+
+      function onWheel(e) {
+        e.preventDefault();
+        const delta = e.deltaY < 0 ? 0.08 : -0.08;
+        setZoom(zoom + delta, true);
+      }
+
+      function touchDist(touches) {
+        const a = touches[0];
+        const b = touches[1];
+        const dx = a.clientX - b.clientX;
+        const dy = a.clientY - b.clientY;
+        return Math.hypot(dx, dy);
+      }
+
+      function onTouchStart(e) {
+        if (e.touches.length === 2) {
+          e.preventDefault();
+          dragging = false;
+          pinchStartDist = touchDist(e.touches);
+          pinchStartZoom = zoom;
+        }
+      }
+
+      function onTouchMove(e) {
+        if (e.touches.length === 2 && pinchStartDist > 0) {
+          e.preventDefault();
+          const dist = touchDist(e.touches);
+          setZoom(pinchStartZoom * (dist / pinchStartDist), true);
+        }
+      }
+
+      function onTouchEnd(e) {
+        if (e.touches.length < 2) pinchStartDist = 0;
+      }
+
+      function onZoomInput() {
+        setZoom(Number(zoomInput.value) / 100, true);
+      }
+
+      function onReset() {
+        zoom = 1;
+        offsetX = 0;
+        offsetY = 0;
+        zoomInput.value = '100';
+        applyTransform();
+      }
+
+      async function onConfirm() {
+        try {
+          const m = maxOffsets();
+          const imgLeft = m.frameW / 2 + offsetX - m.dispW / 2;
+          const imgTop = m.frameH / 2 + offsetY - m.dispH / 2;
+          const scale = coverScale * zoom;
+          const sx = (-imgLeft) / scale;
+          const sy = (-imgTop) / scale;
+          const sw = m.frameW / scale;
+          const sh = m.frameH / scale;
+          const cropped = await canvasCropToFile(img, sx, sy, sw, sh, file, maxEdge);
+          finish(cropped);
+        } catch (err) {
+          fail(err);
+        }
+      }
+
+      function onCancel() {
+        finish(null);
+      }
+
+      function onBackdrop(e) {
+        if (e.target === modal) onCancel();
+      }
+
+      function onKey(e) {
+        if (e.key === 'Escape') onCancel();
+      }
+
+      img.onload = () => {
+        naturalW = img.naturalWidth || img.width;
+        naturalH = img.naturalHeight || img.height;
+        if (!naturalW || !naturalH) {
+          fail(new Error('ပုံဖတ်မရပါ'));
+          return;
+        }
+        imgEl.src = url;
+        modal.classList.add('open');
+        // Measure stage after open + aspect class
+        requestAnimationFrame(() => {
+          const frameW = stage.clientWidth || 420;
+          const frameH = stage.clientHeight || (isSquare ? 420 : Math.round(420 * 9 / 16));
+          coverScale = Math.max(frameW / naturalW, frameH / naturalH);
+          zoom = 1;
+          offsetX = 0;
+          offsetY = 0;
+          applyTransform();
+        });
       };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        reject(new Error('ပုံဖွင့်မရပါ'));
-      };
+      img.onerror = () => fail(new Error('ပုံဖွင့်မရပါ'));
+
+      stage.addEventListener('pointerdown', onPointerDown);
+      window.addEventListener('pointermove', onPointerMove);
+      window.addEventListener('pointerup', onPointerUp);
+      window.addEventListener('pointercancel', onPointerUp);
+      stage.addEventListener('wheel', onWheel, { passive: false });
+      stage.addEventListener('touchstart', onTouchStart, { passive: false });
+      stage.addEventListener('touchmove', onTouchMove, { passive: false });
+      stage.addEventListener('touchend', onTouchEnd);
+      $('#imageAdjustConfirm').addEventListener('click', onConfirm);
+      $('#imageAdjustCancel').addEventListener('click', onCancel);
+      $('#imageAdjustClose').addEventListener('click', onCancel);
+      $('#imageAdjustReset').addEventListener('click', onReset);
+      zoomInput.addEventListener('input', onZoomInput);
+      modal.addEventListener('click', onBackdrop);
+      window.addEventListener('keydown', onKey);
+
       img.src = url;
     });
   }
@@ -764,10 +1007,21 @@
         return;
       }
       try {
-        pendingProductImageFile = await cropImageToRatio(file, 1, 1);
+        const cropped = await cropImageToRatio(file, 1, 1);
+        if (!cropped) {
+          pImageInput.value = '';
+          const cur = openProductModal._current;
+          setFramePreview(
+            '#pImagePreview',
+            '#pImagePreviewEmpty',
+            cur && cur.image_path ? imgUrl(cur.image_path) : ''
+          );
+          return;
+        }
+        pendingProductImageFile = cropped;
         pendingProductPreviewUrl = URL.createObjectURL(pendingProductImageFile);
         setFramePreview('#pImagePreview', '#pImagePreviewEmpty', pendingProductPreviewUrl);
-        $('#pImageHint').textContent = '1:1 center-crop ပြီး — သိမ်းမှ upload လုပ်မည်';
+        $('#pImageHint').textContent = '1:1 ညှိပြီး — သိမ်းမှ upload လုပ်မည်';
       } catch (err) {
         toast(err.message || 'ပုံပြင်မရပါ');
         pImageInput.value = '';
@@ -810,7 +1064,8 @@
     } else if ($('#pImage').files[0]) {
       try {
         const cropped = await cropImageToRatio($('#pImage').files[0], 1, 1);
-        fd.append('image', cropped);
+        if (cropped) fd.append('image', cropped);
+        else fd.append('image', $('#pImage').files[0]);
       } catch (_) {
         fd.append('image', $('#pImage').files[0]);
       }
@@ -1307,12 +1562,14 @@
       toast('ပုံဖိုင်သာ တင်နိုင်သည်');
       return;
     }
-    let cropped = file;
+    let cropped;
     try {
       cropped = await cropImageToRatio(file, 16, 9);
-    } catch (_) {
-      cropped = file;
+    } catch (err) {
+      toast(err.message || 'ပုံပြင်မရပါ');
+      return;
     }
+    if (!cropped) return;
     const previewUrl = URL.createObjectURL(cropped);
     setFramePreview('#bannerImagePreview', '#bannerImagePreviewEmpty', previewUrl);
     const fd = new FormData();
