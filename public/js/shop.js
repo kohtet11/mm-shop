@@ -341,9 +341,17 @@
   }
 
   function authenticityBadgeHtml(p) {
-    const a = String(p && p.authenticity ? p.authenticity : 'authentic').toLowerCase();
-    if (a === 'copy') return '<span class="auth-badge copy">Copy</span>';
-    return '<span class="auth-badge authentic">Authentic</span>';
+    // Authenticity chips are Blind box only
+    if (!p || String(p.category || '') !== 'blind_box') return '';
+    const raw = String(p.authenticity != null ? p.authenticity : 'authentic').trim();
+    const a = raw.toLowerCase();
+    if (a === 'copy' || a === 'replica' || a === 'fake') {
+      return '<span class="auth-badge copy">Copy</span>';
+    }
+    if (!raw || a === 'authentic' || a === 'original' || a === 'auth') {
+      return '<span class="auth-badge authentic">Authentic</span>';
+    }
+    return `<span class="auth-badge custom">${escapeHtml(raw)}</span>`;
   }
 
   function discountBadgeHtml(pct) {

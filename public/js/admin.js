@@ -401,11 +401,76 @@
     loadProducts._cache = products;
   }
 
+  const AUTH_BUILTIN = [
+    { value: 'authentic', label: 'မူရင်း Authentic' },
+    { value: 'copy', label: 'Copy' },
+  ];
+
+  function fillAuthenticitySelect(selected) {
+    const sel = $('#pAuthenticity');
+    if (!sel) return;
+    let want = selected != null && selected !== '' ? String(selected) : 'authentic';
+    if (!want) want = 'authentic';
+    const extras = [];
+    const lower = want.toLowerCase();
+    const isBuiltin = AUTH_BUILTIN.some((o) => o.value === lower);
+    if (!isBuiltin) {
+      extras.push({ value: want, label: want });
+    }
+    // Keep any previously added custom options still in the select
+    [...sel.options].forEach((o) => {
+      if (!AUTH_BUILTIN.some((b) => b.value === o.value) && o.value !== want) {
+        extras.push({ value: o.value, label: o.textContent || o.value });
+      }
+    });
+    const seen = new Set();
+    const opts = [...AUTH_BUILTIN, ...extras].filter((o) => {
+      if (seen.has(o.value)) return false;
+      seen.add(o.value);
+      return true;
+    });
+    sel.innerHTML = opts
+      .map((o) => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`)
+      .join('');
+    const matchVal = isBuiltin ? lower : want;
+    if (![...sel.options].some((o) => o.value === matchVal)) {
+      const opt = document.createElement('option');
+      opt.value = want;
+      opt.textContent = want;
+      sel.appendChild(opt);
+      sel.value = want;
+    } else {
+      sel.value = matchVal;
+    }
+  }
+
+  function ensureAuthOption(value, label) {
+    const sel = $('#pAuthenticity');
+    if (!sel || !value) return;
+    const v = String(value).trim();
+    if (!v) return;
+    if (![...sel.options].some((o) => o.value === v)) {
+      const opt = document.createElement('option');
+      opt.value = v;
+      opt.textContent = label || v;
+      sel.appendChild(opt);
+    }
+    sel.value = v;
+  }
+
   function syncProductSpinFields(product) {
     const add = $('#pSpinAdd');
     const fields = $('#pSpinFields');
     const hint = $('#pSpinHint');
     if (!add || !fields) return;
+    const cat = ($('#pCategory') && $('#pCategory').value) || '';
+    if (cat !== 'blind_box') {
+      add.checked = false;
+      fields.classList.add('hidden');
+      delete add.dataset.spinId;
+      if (hint) hint.textContent = 'ပစ္စည်းအမည်ဖြင့် စပင်ဘီး entry အသစ် ထည့်မည်';
+      return;
+    }
     const prizes = loadSpinPrizes._cache || [];
     const linked = product
       ? prizes.find((s) => s.product_id && Number(s.product_id) === Number(product.id))
@@ -423,7 +488,34 @@
     }
   }
 
+  function syncProductCategoryDependentFields(product) {
+    const cat = ($('#pCategory') && $('#pCategory').value) || '';
+    const isBlind = cat === 'blind_box';
+    const isGame = cat === 'spin_game';
+    const authGroup = $('#pAuthGroup');
+    const spinAddGroup = $('#pSpinAddGroup');
+    const spinCreditGroup = $('#pSpinCreditGroup');
+    if (authGroup) authGroup.classList.toggle('hidden', !isBlind);
+    if (spinAddGroup) spinAddGroup.classList.toggle('hidden', !isBlind);
+    // is_spin_credit only for Game / existing spin-credit products
+    const showSpinCredit =
+      isGame || !!(product && Number(product.is_spin_credit));
+    if (spinCreditGroup) spinCreditGroup.classList.toggle('hidden', !showSpinCredit);
+    if (!isBlind) {
+      const add = $('#pSpinAdd');
+      const fields = $('#pSpinFields');
+      if (add) {
+        add.checked = false;
+        delete add.dataset.spinId;
+      }
+      if (fields) fields.classList.add('hidden');
+    } else {
+      syncProductSpinFields(product || openProductModal._current || null);
+    }
+  }
+
   function openProductModal(product) {
+    openProductModal._current = product || null;
     $('#productModalTitle').textContent = product ? 'ပစ္စည်း ပြင်ဆင်ရန်' : 'ပစ္စည်း အသစ်';
     $('#productId').value = product ? product.id : '';
     $('#pName').value = product ? product.name : '';
@@ -442,11 +534,7 @@
       const want = raw || (pSpinCredit && pSpinCredit.checked ? 'spin_game' : 'blind_box');
       fillProductCategorySelect(want);
     }
-    const isCopy = product && String(product.authenticity || '') === 'copy';
-    const authCopy = $('#pAuthCopy');
-    const authAuthentic = $('#pAuthAuthentic');
-    if (authCopy) authCopy.checked = !!isCopy;
-    if (authAuthentic) authAuthentic.checked = !isCopy;
+    fillAuthenticitySelect(product ? product.authenticity || 'authentic' : 'authentic');
     const pct = product ? String(Number(product.discount_percent) || 0) : '0';
     const discSel = $('#pDiscount');
     if (discSel) {
@@ -463,8 +551,15 @@
     $('#pImageHint').textContent = product && product.image_path
       ? 'လက်ရှိပုံ: ' + product.image_path
       : '';
-    syncProductSpinFields(product);
+    syncProductCategoryDependentFields(product);
     $('#productModal').classList.add('open');
+  }
+
+  const pCategoryEl = $('#pCategory');
+  if (pCategoryEl) {
+    pCategoryEl.addEventListener('change', () => {
+      syncProductCategoryDependentFields(openProductModal._current || null);
+    });
   }
 
   const pSpinCreditEl = $('#pSpinCredit');
@@ -474,6 +569,7 @@
       if (!pCat) return;
       if (pSpinCreditEl.checked && (pCat.value === 'other' || pCat.value === 'blind_box' || !pCat.value)) {
         pCat.value = 'spin_game';
+        syncProductCategoryDependentFields(openProductModal._current || null);
       }
     });
   }
@@ -483,6 +579,62 @@
     pSpinAddEl.addEventListener('change', () => {
       const fields = $('#pSpinFields');
       if (fields) fields.classList.toggle('hidden', !pSpinAddEl.checked);
+    });
+  }
+
+  function openQuickAuthModal() {
+    const modal = $('#quickAuthModal');
+    const input = $('#quickAuthName');
+    if (!modal || !input) return;
+    input.value = '';
+    modal.classList.add('open');
+    setTimeout(() => input.focus(), 30);
+  }
+
+  function closeQuickAuthModal() {
+    const modal = $('#quickAuthModal');
+    if (modal) modal.classList.remove('open');
+  }
+
+  const pAuthAddBtn = $('#pAuthAddBtn');
+  if (pAuthAddBtn) {
+    pAuthAddBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      openQuickAuthModal();
+    });
+  }
+  const closeQuickAuthModalBtn = $('#closeQuickAuthModal');
+  if (closeQuickAuthModalBtn) {
+    closeQuickAuthModalBtn.addEventListener('click', closeQuickAuthModal);
+  }
+  const cancelQuickAuthModal = $('#cancelQuickAuthModal');
+  if (cancelQuickAuthModal) {
+    cancelQuickAuthModal.addEventListener('click', closeQuickAuthModal);
+  }
+  const quickAuthModal = $('#quickAuthModal');
+  if (quickAuthModal) {
+    quickAuthModal.addEventListener('click', (e) => {
+      if (e.target === quickAuthModal) closeQuickAuthModal();
+    });
+  }
+  const quickAuthForm = $('#quickAuthForm');
+  if (quickAuthForm) {
+    quickAuthForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = ($('#quickAuthName') && $('#quickAuthName').value.trim()) || '';
+      if (!name) {
+        toast('အမည် ထည့်ပါ');
+        return;
+      }
+      // Store custom label as-is (slug-ish lowercase for builtins already handled)
+      const lower = name.toLowerCase();
+      let value = name;
+      if (lower === 'copy' || lower === 'replica' || lower === 'fake') value = 'copy';
+      else if (lower === 'authentic' || lower === 'original' || lower === 'auth' || lower === 'မူရင်း')
+        value = 'authentic';
+      ensureAuthOption(value, name);
+      closeQuickAuthModal();
+      toast('အမှတ်အသား ထည့်ပြီး');
     });
   }
 
@@ -504,9 +656,24 @@
     fd.append('name', $('#pName').value.trim());
     fd.append('price_mmk', $('#pPrice').value);
     fd.append('stock', $('#pStock') ? $('#pStock').value : '99');
-    fd.append('is_spin_credit', $('#pSpinCredit') && $('#pSpinCredit').checked ? '1' : '0');
-    fd.append('category', $('#pCategory') ? $('#pCategory').value : 'blind_box');
-    fd.append('authenticity', $('#pAuthCopy') && $('#pAuthCopy').checked ? 'copy' : 'authentic');
+    const catVal = $('#pCategory') ? $('#pCategory').value : 'blind_box';
+    const isBlindBox = catVal === 'blind_box';
+    // is_spin_credit only when Game controls are shown
+    let spinFlag = '0';
+    if ($('#pSpinCreditGroup') && !$('#pSpinCreditGroup').classList.contains('hidden')) {
+      spinFlag = $('#pSpinCredit') && $('#pSpinCredit').checked ? '1' : '0';
+    }
+    fd.append('is_spin_credit', spinFlag);
+    fd.append('category', catVal);
+    if (isBlindBox) {
+      const authSel = $('#pAuthenticity');
+      fd.append('authenticity', authSel && authSel.value ? authSel.value : 'authentic');
+    } else if (openProductModal._current && openProductModal._current.authenticity) {
+      // Leave existing value unchanged when auth UI is hidden
+      fd.append('authenticity', String(openProductModal._current.authenticity));
+    } else {
+      fd.append('authenticity', 'authentic');
+    }
     fd.append('description', $('#pDesc').value);
     fd.append('active', $('#pActive').checked ? '1' : '0');
     fd.append('on_banner', $('#pOnBanner').checked ? '1' : '0');
@@ -541,7 +708,8 @@
       await loadProducts();
       try {
         const addEl = $('#pSpinAdd');
-        if (addEl && addEl.checked && saved && saved.id) {
+        const savedCat = saved && saved.category ? String(saved.category) : catVal;
+        if (savedCat === 'blind_box' && addEl && addEl.checked && saved && saved.id) {
           const spinId = addEl.dataset.spinId;
           const payload = {
             name: String(saved.name || $('#pName').value.trim()),
@@ -1210,7 +1378,9 @@
     }
     const linkedIds = getLinkedSpinProductIds(selectedId);
     const available = products.filter((p) => {
+      // Always keep currently linked product visible (legacy edge cases)
       if (selectedId && Number(selectedId) === Number(p.id)) return true;
+      if (String(p.category || '') !== 'blind_box') return false;
       return !linkedIds.has(Number(p.id));
     });
     sel.innerHTML =

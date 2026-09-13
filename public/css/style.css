@@ -250,6 +250,10 @@ img { max-width: 100%; display: block; }
   background: #fef3c7;
   color: #92400e;
 }
+.auth-badge.custom {
+  background: #e0e7ff;
+  color: #3730a3;
+}
 .thumb-wrap .auth-badge {
   position: absolute;
   top: 0.65rem;

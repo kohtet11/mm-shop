@@ -295,18 +295,16 @@
             <button type="button" class="btn btn-outline category-add-btn" id="pCategoryAddBtn" title="အမျိုးအစားအသစ် ထည့်မည်" aria-label="အမျိုးအစားအသစ် ထည့်မည်">+</button>
           </div>
         </div>
-        <div class="form-group">
-          <span class="label-like">မူရင်း / Copy *</span>
-          <div class="radio-row" style="display:flex;flex-wrap:wrap;gap:0.85rem;margin-top:0.35rem">
-            <label>
-              <input type="radio" name="pAuth" id="pAuthAuthentic" value="authentic" checked />
-              မူရင်း Authentic
-            </label>
-            <label>
-              <input type="radio" name="pAuth" id="pAuthCopy" value="copy" />
-              Copy
-            </label>
+        <div class="form-group" id="pAuthGroup">
+          <label for="pAuthenticity">မူရင်း / Copy</label>
+          <div class="category-select-row">
+            <select id="pAuthenticity">
+              <option value="authentic">မူရင်း Authentic</option>
+              <option value="copy">Copy</option>
+            </select>
+            <button type="button" class="btn btn-outline category-add-btn" id="pAuthAddBtn" title="အမှတ်အသားအသစ် ထည့်မည်" aria-label="အမှတ်အသားအသစ် ထည့်မည်">+</button>
           </div>
+          <div class="hint">Blind box ပစ္စည်းများအတွက်သာ — စတိုးတွင် badge ပြမည်</div>
         </div>
         <div class="form-group">
           <label for="pStock">စတော့ (အရေအတွက်)</label>
@@ -332,11 +330,11 @@
             <input type="checkbox" id="pOnBanner" /> Banner တွင် ပြမည်
           </label>
         </div>
-        <div class="form-group">
+        <div class="form-group" id="pSpinCreditGroup">
           <label>
             <input type="checkbox" id="pSpinCredit" /> စပင်ဘီး ကံစမ်းခွင့် ပစ္စည်း (is_spin_credit)
           </label>
-          <div class="hint">ဖွင့်ထားရင် ငွေချေရာတွင် လိပ်စာ မလို — အမည်၊ ဖုန်း၊ စလစ်သာ</div>
+          <div class="hint">Game / buy-spin ပစ္စည်းအတွက်သာ — ငွေချေရာတွင် လိပ်စာ မလို</div>
         </div>
         <div class="form-group">
           <label for="pDiscount">% OFF</label>
@@ -358,13 +356,14 @@
           <div class="hint">စျေးနှုန်းသည် လက်ရှိရောင်းဈေး — badge တွင် % OFF ပြမည်</div>
         </div>
 
-        <div class="form-group" style="border-top:1px dashed var(--border);padding-top:0.85rem;margin-top:0.5rem">
+        <div class="form-group" id="pSpinAddGroup" style="border-top:1px dashed var(--border);padding-top:0.85rem;margin-top:0.5rem">
           <label>
             <input type="checkbox" id="pSpinAdd" /> ဘီးတွင် ထည့်မည်
           </label>
           <div id="pSpinFields" class="hidden" style="margin-top:0.5rem">
             <div class="hint" id="pSpinHint">ပစ္စည်းအမည်ဖြင့် စပင်ဘီး entry အသစ်/အပ်ဒိတ် လုပ်မည်</div>
           </div>
+          <div class="hint">Blind box ပစ္စည်းများသာ ဘီးနှင့် ချိတ်နိုင်သည်</div>
         </div>
         <button type="submit" class="btn btn-primary" style="width:100%">သိမ်းမည်</button>
       </form>
@@ -444,6 +443,26 @@
     </div>
   </div>
 
+
+  <!-- Quick authenticity label add (from product form) -->
+  <div class="overlay" id="quickAuthModal">
+    <div class="panel" style="max-width:360px">
+      <div class="panel-header">
+        <h2>အမှတ်အသားအသစ် ထည့်မည်</h2>
+        <button type="button" class="close-x" id="closeQuickAuthModal">×</button>
+      </div>
+      <form id="quickAuthForm">
+        <div class="form-group">
+          <label for="quickAuthName">အမည် *</label>
+          <input id="quickAuthName" required placeholder="ဥပမာ — Premium / Official" autocomplete="off" maxlength="64" />
+        </div>
+        <div class="row-actions" style="gap:0.5rem">
+          <button type="submit" class="btn btn-primary">ထည့်မည်</button>
+          <button type="button" class="btn btn-outline" id="cancelQuickAuthModal">ပယ်ဖျက်</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <!-- Quick category add (from product form) -->
   <div class="overlay" id="quickCategoryModal">

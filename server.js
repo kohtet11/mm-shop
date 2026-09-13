@@ -294,10 +294,31 @@ function categoryForProduct(input, isSpinCredit) {
 }
 
 function normalizeAuthenticity(value, fallback = 'authentic') {
-  const s = String(value || '').trim().toLowerCase();
+  const raw = String(value || '').trim();
+  if (!raw) return fallback;
+  const s = raw.toLowerCase();
   if (s === 'copy' || s === 'replica' || s === 'fake') return 'copy';
-  if (s === 'authentic' || s === 'original' || s === 'auth') return 'authentic';
-  return fallback;
+  if (s === 'authentic' || s === 'original' || s === 'auth' || s === 'မူရင်း') return 'authentic';
+  // Custom authenticity label (Blind box Plus): store cleaned display string
+  const cleaned = raw.replace(/[<>"'`\\]/g, '').slice(0, 64).trim();
+  if (!cleaned) return fallback;
+  return cleaned;
+}
+
+/** Spin prizes may only link to blind_box products. */
+function assertSpinPrizeBlindBoxProduct(database, productId) {
+  if (productId == null) return null;
+  const prod = database
+    .prepare('SELECT id, category, name FROM products WHERE id = ?')
+    .get(productId);
+  if (!prod) return { status: 400, error: 'ပစ္စည်း မတွေ့ပါ' };
+  if (String(prod.category || '') !== 'blind_box') {
+    return {
+      status: 400,
+      error: 'ဘီးဆုသည် Blind box ပစ္စည်းနှင့်သာ ချိတ်နိုင်သည်',
+    };
+  }
+  return null;
 }
 
 function migrateOrdersSpinCredits(database) {
@@ -2349,8 +2370,8 @@ app.post('/api/admin/spin-prizes', requireAdmin, (req, res) => {
     if (product_id !== undefined && product_id !== null && product_id !== '') {
       pid = parseInt(product_id, 10);
       if (!Number.isFinite(pid)) return res.status(400).json({ error: 'Invalid product_id' });
-      const prod = db.prepare('SELECT id FROM products WHERE id = ?').get(pid);
-      if (!prod) return res.status(400).json({ error: 'ပစ္စည်း မတွေ့ပါ' });
+      const bad = assertSpinPrizeBlindBoxProduct(db, pid);
+      if (bad) return res.status(bad.status).json({ error: bad.error });
       const taken = findSpinPrizeByProductId(db, pid);
       if (taken) {
         return res.status(400).json({
@@ -2398,8 +2419,8 @@ app.put('/api/admin/spin-prizes/:id', requireAdmin, (req, res) => {
       } else {
         pid = parseInt(product_id, 10);
         if (!Number.isFinite(pid)) return res.status(400).json({ error: 'Invalid product_id' });
-        const prod = db.prepare('SELECT id FROM products WHERE id = ?').get(pid);
-        if (!prod) return res.status(400).json({ error: 'ပစ္စည်း မတွေ့ပါ' });
+        const bad = assertSpinPrizeBlindBoxProduct(db, pid);
+        if (bad) return res.status(bad.status).json({ error: bad.error });
         const taken = findSpinPrizeByProductId(db, pid, id);
         if (taken) {
           return res.status(400).json({
