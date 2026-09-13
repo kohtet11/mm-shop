@@ -518,6 +518,41 @@
     }
   }
 
+
+  function openProductDetail(productId) {
+    const p = products.find((x) => Number(x.id) === Number(productId));
+    const body = $('#productDetailBody');
+    const title = $('#productDetailTitle');
+    if (!p || !body) return;
+    const stock = productStock(p);
+    const out = stock <= 0;
+    if (title) title.textContent = p.name || 'ပစ္စည်း အသေးစိတ်';
+    body.innerHTML = `
+      <div class="product-detail-media">
+        <img src="${imgUrl(p.image_path)}" alt="${escapeHtml(p.name)}" />
+        ${authenticityBadgeHtml(p)}
+        ${discountBadgeHtml(p.discount_percent)}
+        ${out ? '<span class="stock-badge">စတော့ကုန် / Out of stock</span>' : ''}
+      </div>
+      <div class="product-detail-info">
+        <h3>${escapeHtml(p.name)}</h3>
+        <div class="product-detail-meta">
+          ${authenticityBadgeHtml(p)}
+          ${discountBadgeHtml(p.discount_percent)}
+          ${out ? '<span class="badge spin-expired">စတော့ကုန်</span>' : '<span class="hint">ကျန် ' + stock + '</span>'}
+        </div>
+        ${productPriceHtml(p, false)}
+        <div class="product-detail-desc">${escapeHtml(p.description || 'အချက်အလက် မရှိပါ')}</div>
+        <div class="product-detail-actions">
+          <button type="button" class="btn btn-primary" data-detail-add="${p.id}" ${
+            out ? 'disabled aria-disabled="true"' : ''
+          }>${out ? 'စတော့ကုန်' : 'ခြင်းတောင်းထည့်မည်'}</button>
+          <button type="button" class="btn btn-outline" data-close="productDetailOverlay">ပိတ်မည်</button>
+        </div>
+      </div>`;
+    openOverlay('productDetailOverlay');
+  }
+
   function scrollToProduct(productId) {
     const p = products.find((x) => Number(x.id) === Number(productId));
     if (p) {
@@ -538,10 +573,7 @@
     card.scrollIntoView({ behavior: 'smooth', block: 'center' });
     card.classList.add('highlight');
     setTimeout(() => card.classList.remove('highlight'), 1600);
-    const addBtn = card.querySelector('[data-add]');
-    if (addBtn) {
-      try { addBtn.focus({ preventScroll: true }); } catch (_) { addBtn.focus(); }
-    }
+    openProductDetail(productId);
   }
 
   function productStock(p) {
@@ -871,9 +903,20 @@
       startPromoTimer();
       return;
     }
+    const detailAdd = e.target.closest('[data-detail-add]');
+    if (detailAdd) {
+      if (detailAdd.disabled) return;
+      addToCart(Number(detailAdd.dataset.detailAdd));
+      return;
+    }
     const add = e.target.closest('[data-add]');
     if (add) {
       addToCart(Number(add.dataset.add));
+      return;
+    }
+    const card = e.target.closest('.product-card[data-id]');
+    if (card && !e.target.closest('[data-add]')) {
+      openProductDetail(Number(card.dataset.id));
       return;
     }
     const close = e.target.closest('[data-close]');
@@ -912,6 +955,7 @@
       stopMyOrdersPolling();
     }
     if (e.target === $('#checkoutOverlay')) closeOverlay('checkoutOverlay');
+    if (e.target === $('#productDetailOverlay')) closeOverlay('productDetailOverlay');
   });
 
   $('#openCartBtn').addEventListener('click', () => {
