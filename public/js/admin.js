@@ -2462,6 +2462,7 @@
     const data = await api('/api/admin/reports/' + filters.type + q);
     lastReportPayload = data;
     const meta = $('#reportMeta');
+    const summaryEl = $('#reportSummary');
     const periodLabel =
       filters.period === 'day' ? 'နေ့' : filters.period === 'month' ? 'လ' : 'နှစ်';
     const typeLabel = filters.type === 'sales' ? 'ရောင်းရင်း' : 'Spin';
@@ -2475,6 +2476,18 @@
         ' (Asia/Yangon) — ' +
         (data.count || 0) +
         ' ခု';
+    }
+    if (summaryEl) {
+      if (filters.type === 'sales') {
+        summaryEl.textContent =
+          'ကာလ စုစုပေါင်း: ' + formatMMK(data.period_total_mmk || 0);
+      } else {
+        summaryEl.textContent =
+          'ကာလ Order စုစုပေါင်း (unique ' +
+          (data.unique_orders || 0) +
+          '): ' +
+          formatMMK(data.period_order_total_mmk || 0);
+      }
     }
     const thead = $('#reportPreviewTable thead');
     const tbody = $('#reportPreviewTable tbody');
@@ -2512,6 +2525,7 @@
         '<tr>' +
         '<th>အချိန်</th><th>Order ID</th><th>ဆု</th><th>ပစ္စည်း</th>' +
         '<th>အမည်</th><th>ဖုန်း</th><th>လိပ်စာ</th><th>ကျန်အခွင့်</th>' +
+        '<th>Order total MMK</th>' +
         '</tr>';
       tbody.innerHTML =
         (data.rows || [])
@@ -2526,11 +2540,12 @@
               '<td>' + escapeHtml(r.phone) + '</td>' +
               '<td>' + escapeHtml(r.address) + '</td>' +
               '<td>' + (Number(r.spin_credits) || 0) + '</td>' +
+              '<td>' + formatMMK(r.order_total_mmk) + '</td>' +
               '</tr>'
             );
           })
           .join('') ||
-        '<tr><td colspan="8" class="hint">မှတ်တမ်း မရှိပါ</td></tr>';
+        '<tr><td colspan="9" class="hint">မှတ်တမ်း မရှိပါ</td></tr>';
     }
     return data;
   }

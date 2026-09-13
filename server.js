@@ -2244,6 +2244,24 @@ function querySalesReportRows(database, periodInfo) {
   });
 }
 
+function sumSalesPeriodTotalMmk(rows) {
+  return rows.reduce((sum, r) => sum + (Number(r.total_mmk) || 0), 0);
+}
+
+function sumUniqueSpinOrderTotals(rows) {
+  const seen = new Map();
+  for (const r of rows) {
+    const oid = r.order_id;
+    if (!oid) continue;
+    if (!seen.has(oid)) {
+      seen.set(oid, Number(r.order_total_mmk) || 0);
+    }
+  }
+  let total = 0;
+  for (const v of seen.values()) total += v;
+  return { unique_orders: seen.size, period_order_total_mmk: total };
+}
+
 function querySpinReportRows(database, periodInfo) {
   const where = periodInfo.whereSql.replace(/COL/g, 'sp.created_at');
   const rows = database
@@ -2258,6 +2276,7 @@ function querySpinReportRows(database, periodInfo) {
          o.phone,
          o.address,
          o.spin_credits,
+         o.total_mmk AS order_total_mmk,
          COALESCE(spr.product_id, NULL) AS product_id,
          p.name AS product_name
        FROM spin_plays sp
@@ -2278,6 +2297,7 @@ function querySpinReportRows(database, periodInfo) {
     phone: r.phone || '',
     address: r.address || '',
     spin_credits: Number(r.spin_credits) || 0,
+    order_total_mmk: Number(r.order_total_mmk) || 0,
   }));
 }
 
@@ -2296,7 +2316,7 @@ async function buildSalesWorkbook(rows, periodInfo) {
     { header: 'Phone', key: 'phone', width: 14 },
     { header: 'Address', key: 'address', width: 28 },
     { header: 'Items', key: 'items_summary', width: 36 },
-    { header: 'Total MMK', key: 'total_mmk', width: 12 },
+    { header: 'Total MMK', key: 'total_mmk', width: 14 },
     { header: 'Status', key: 'status_label', width: 14 },
     { header: 'Spin credits', key: 'spin_credits', width: 12 },
     { header: 'Spin completed', key: 'spin_completed', width: 14 },
@@ -2304,11 +2324,19 @@ async function buildSalesWorkbook(rows, periodInfo) {
   ];
   ws.getRow(1).font = { bold: true };
   for (const r of rows) ws.addRow(r);
-  ws.addRow([]);
-  ws.addRow({
-    order_id: 'Period',
-    created_at: `${periodInfo.periodLabel} / ${periodInfo.date} (Asia/Yangon)`,
+  const periodTotal = sumSalesPeriodTotalMmk(rows);
+  const totalRow = ws.addRow({
+    order_id: 'စုစုပေါင်း',
+    total_mmk: periodTotal,
   });
+  totalRow.font = { bold: true };
+  ws.addRow([]);
+  const summaryRow = ws.addRow({
+    order_id: 'ကာလ စုစုပေါင်း',
+    created_at: `${periodInfo.periodLabel} / ${periodInfo.date} (Asia/Yangon)`,
+    total_mmk: periodTotal,
+  });
+  summaryRow.font = { bold: true };
   return wb;
 }
 
@@ -2325,14 +2353,18 @@ async function buildSpinWorkbook(rows, periodInfo) {
     { header: 'Phone', key: 'phone', width: 14 },
     { header: 'Address', key: 'address', width: 28 },
     { header: 'Remaining credits', key: 'spin_credits', width: 16 },
+    { header: 'Order total MMK', key: 'order_total_mmk', width: 16 },
   ];
   ws.getRow(1).font = { bold: true };
   for (const r of rows) ws.addRow(r);
+  const uniq = sumUniqueSpinOrderTotals(rows);
   ws.addRow([]);
-  ws.addRow({
-    created_at: 'Period',
+  const summaryRow = ws.addRow({
+    created_at: 'ကာလ Order စုစုပေါင်း (unique)',
     order_id: `${periodInfo.periodLabel} / ${periodInfo.date} (Asia/Yangon)`,
+    order_total_mmk: uniq.period_order_total_mmk,
   });
+  summaryRow.font = { bold: true };
   return wb;
 }
 
@@ -2344,7 +2376,7 @@ function escapeHtmlReport(s) {
     .replace(/"/g, '&quot;');
 }
 
-function renderReportPrintHtml({ title, subtitle, headers, bodyRows }) {
+function renderReportPrintHtml({ title, subtitle, summaryLine, headers, bodyRows }) {
   const th = headers.map((h) => `<th>${escapeHtmlReport(h)}</th>`).join('');
   const trs = bodyRows.length
     ? bodyRows
@@ -2356,6 +2388,9 @@ function renderReportPrintHtml({ title, subtitle, headers, bodyRows }) {
         )
         .join('\n')
     : `<tr><td colspan="${headers.length}">မှတ်တမ်း မရှိပါ</td></tr>`;
+  const summaryHtml = summaryLine
+    ? `<div class="summary">${escapeHtmlReport(summaryLine)}</div>`
+    : '';
   return `<!DOCTYPE html>
 <html lang="my">
 <head>
@@ -2365,7 +2400,12 @@ function renderReportPrintHtml({ title, subtitle, headers, bodyRows }) {
   <style>
     body { font-family: system-ui, sans-serif; margin: 1.25rem; color: #111; }
     h1 { font-size: 1.25rem; margin: 0 0 0.35rem; }
-    .meta { color: #555; margin-bottom: 1rem; font-size: 0.95rem; }
+    .meta { color: #555; margin-bottom: 0.65rem; font-size: 0.95rem; }
+    .summary {
+      font-size: 1.15rem; font-weight: 700; margin: 0 0 1rem;
+      padding: 0.55rem 0.75rem; background: #ecfdf5; border: 1px solid #99f6e4;
+      border-radius: 8px;
+    }
     table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
     th, td { border: 1px solid #ccc; padding: 0.4rem 0.45rem; text-align: left; vertical-align: top; }
     th { background: #f3f4f6; }
@@ -2378,6 +2418,7 @@ function renderReportPrintHtml({ title, subtitle, headers, bodyRows }) {
       .toolbar { display: none !important; }
       body { margin: 0.4cm; }
       th { background: #eee !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .summary { background: #f0fdf4 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
   </style>
 </head>
@@ -2387,6 +2428,7 @@ function renderReportPrintHtml({ title, subtitle, headers, bodyRows }) {
   </div>
   <h1>${escapeHtmlReport(title)}</h1>
   <div class="meta">${escapeHtmlReport(subtitle)}</div>
+  ${summaryHtml}
   <table>
     <thead><tr>${th}</tr></thead>
     <tbody>${trs}</tbody>
@@ -2574,12 +2616,14 @@ app.get('/api/admin/reports/sales', requireAdmin, (req, res) => {
     const info = parseReportPeriodDate(req.query);
     if (info.error) return res.status(400).json({ error: info.error });
     const rows = querySalesReportRows(db, info);
+    const period_total_mmk = sumSalesPeriodTotalMmk(rows);
     res.json({
       type: 'sales',
       period: info.period,
       date: info.date,
       timezone: 'Asia/Yangon',
       count: rows.length,
+      period_total_mmk,
       rows,
     });
   } catch (e) {
@@ -2593,12 +2637,15 @@ app.get('/api/admin/reports/spin', requireAdmin, (req, res) => {
     const info = parseReportPeriodDate(req.query);
     if (info.error) return res.status(400).json({ error: info.error });
     const rows = querySpinReportRows(db, info);
+    const uniq = sumUniqueSpinOrderTotals(rows);
     res.json({
       type: 'spin',
       period: info.period,
       date: info.date,
       timezone: 'Asia/Yangon',
       count: rows.length,
+      unique_orders: uniq.unique_orders,
+      period_order_total_mmk: uniq.period_order_total_mmk,
       rows,
     });
   } catch (e) {
@@ -2659,9 +2706,11 @@ app.get('/api/admin/reports/print', requireAdmin, (req, res) => {
     let html;
     if (type === 'sales') {
       const rows = querySalesReportRows(db, info);
+      const periodTotal = sumSalesPeriodTotalMmk(rows);
       html = renderReportPrintHtml({
         title: 'Glow Gear — ရောင်းရင်း စာရင်း',
         subtitle: subtitle + ` — စုစုပေါင်း ${rows.length} ခု`,
+        summaryLine: `ကာလ စုစုပေါင်း: ${periodTotal.toLocaleString('en-US')} MMK`,
         headers: [
           'Order ID',
           'အချိန်',
@@ -2691,9 +2740,11 @@ app.get('/api/admin/reports/print', requireAdmin, (req, res) => {
       });
     } else {
       const rows = querySpinReportRows(db, info);
+      const uniq = sumUniqueSpinOrderTotals(rows);
       html = renderReportPrintHtml({
         title: 'Glow Gear — Spin စာရင်း',
         subtitle: subtitle + ` — စုစုပေါင်း ${rows.length} ခု`,
+        summaryLine: `ကာလ Order စုစုပေါင်း (unique ${uniq.unique_orders}): ${uniq.period_order_total_mmk.toLocaleString('en-US')} MMK`,
         headers: [
           'အချိန်',
           'Order ID',
@@ -2703,6 +2754,7 @@ app.get('/api/admin/reports/print', requireAdmin, (req, res) => {
           'ဖုန်း',
           'လိပ်စာ',
           'ကျန်အခွင့်',
+          'Order total MMK',
         ],
         bodyRows: rows.map((r) => [
           r.created_at,
@@ -2713,6 +2765,7 @@ app.get('/api/admin/reports/print', requireAdmin, (req, res) => {
           r.phone,
           r.address,
           r.spin_credits,
+          r.order_total_mmk,
         ]),
       });
     }
