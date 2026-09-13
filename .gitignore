@@ -5,9 +5,11 @@ uploads/products/*
 uploads/slips/*
 uploads/branding/*
 uploads/payment/*
+uploads/banners/*
 !uploads/products/.gitkeep
 !uploads/slips/.gitkeep
 !uploads/branding/.gitkeep
 !uploads/payment/.gitkeep
+!uploads/banners/.gitkeep
 .env
 *.log

@@ -19,9 +19,10 @@ const PRODUCTS_DIR = path.join(UPLOADS_DIR, 'products');
 const SLIPS_DIR = path.join(UPLOADS_DIR, 'slips');
 const BRANDING_DIR = path.join(UPLOADS_DIR, 'branding');
 const PAYMENT_DIR = path.join(UPLOADS_DIR, 'payment');
+const BANNERS_DIR = path.join(UPLOADS_DIR, 'banners');
 const DB_PATH = path.join(DATA_DIR, 'shop.db');
 
-[DATA_DIR, PRODUCTS_DIR, SLIPS_DIR, BRANDING_DIR, PAYMENT_DIR].forEach((d) => {
+[DATA_DIR, PRODUCTS_DIR, SLIPS_DIR, BRANDING_DIR, PAYMENT_DIR, BANNERS_DIR].forEach((d) => {
   if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
 });
 
@@ -188,6 +189,15 @@ function createTables(database) {
       created_at TEXT DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_categories_active_sort ON categories(active, sort_order, id);
+
+    CREATE TABLE IF NOT EXISTS banner_slides (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      image_path TEXT NOT NULL,
+      active INTEGER DEFAULT 1,
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_banner_slides_active_sort ON banner_slides(active, sort_order, id);
   `);
 }
 
@@ -988,6 +998,7 @@ const uploadProduct = makeUploader(PRODUCTS_DIR);
 const uploadSlip = makeUploader(SLIPS_DIR);
 const uploadBranding = makeUploader(BRANDING_DIR);
 const uploadPayment = makeUploader(PAYMENT_DIR);
+const uploadBanner = makeUploader(BANNERS_DIR);
 
 // --- App ---
 const app = express();
@@ -1086,6 +1097,18 @@ app.get('/api/categories', (_req, res) => {
       `SELECT id, slug, name, active, sort_order, created_at
        FROM categories
        WHERE active = 1 AND slug != 'other'
+       ORDER BY sort_order ASC, id ASC`
+    )
+    .all();
+  res.json(rows);
+});
+
+app.get('/api/banner-slides', (_req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT id, image_path, active, sort_order, created_at
+       FROM banner_slides
+       WHERE active = 1
        ORDER BY sort_order ASC, id ASC`
     )
     .all();
@@ -2646,6 +2669,124 @@ app.put('/api/admin/settings', requireAdmin, (req, res) => {
     mmqr_path: s.mmqr_path || '',
     mmqr_url: publicUploadUrl(s.mmqr_path || ''),
   });
+});
+
+
+function mapBannerSlide(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    image_path: row.image_path || '',
+    image_url: publicUploadUrl(row.image_path || ''),
+    active: Number(row.active) ? 1 : 0,
+    sort_order: Number(row.sort_order) || 0,
+    created_at: row.created_at || '',
+  };
+}
+
+app.get('/api/admin/banner-slides', requireAdmin, (_req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT id, image_path, active, sort_order, created_at
+       FROM banner_slides
+       ORDER BY sort_order ASC, id ASC`
+    )
+    .all();
+  res.json(rows.map(mapBannerSlide));
+});
+
+app.post('/api/admin/banner-slides', requireAdmin, (req, res) => {
+  uploadBanner.single('image')(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message || 'Upload failed' });
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'ပုံတင်ရန် လိုအပ်သည်' });
+      }
+      const image_path = `banners/${req.file.filename}`;
+      const sortRaw = req.body && req.body.sort_order;
+      let sort_order = 0;
+      if (sortRaw !== undefined && sortRaw !== null && String(sortRaw).trim() !== '') {
+        sort_order = Number(sortRaw) || 0;
+      } else {
+        const maxRow = db.prepare('SELECT MAX(sort_order) AS m FROM banner_slides').get();
+        sort_order = (maxRow && maxRow.m != null ? Number(maxRow.m) : 0) + 10;
+      }
+      const active =
+        req.body && req.body.active !== undefined && req.body.active !== null && String(req.body.active) !== ''
+          ? Number(req.body.active) ? 1 : 0
+          : 1;
+      const info = db
+        .prepare(
+          `INSERT INTO banner_slides (image_path, active, sort_order) VALUES (?, ?, ?)`
+        )
+        .run(image_path, active, sort_order);
+      const row = db
+        .prepare(
+          `SELECT id, image_path, active, sort_order, created_at FROM banner_slides WHERE id = ?`
+        )
+        .get(info.lastInsertRowid);
+      res.status(201).json(mapBannerSlide(row));
+    } catch (e) {
+      console.error(e);
+      if (req.file) {
+        try {
+          fs.unlinkSync(path.join(BANNERS_DIR, req.file.filename));
+        } catch (_) {}
+      }
+      res.status(500).json({ error: 'Server error' });
+    }
+  });
+});
+
+app.patch('/api/admin/banner-slides/:id', requireAdmin, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid id' });
+    }
+    const existing = db.prepare('SELECT * FROM banner_slides WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'မတွေ့ပါ' });
+
+    let active = existing.active;
+    let sort_order = existing.sort_order;
+    if (req.body && req.body.active !== undefined) {
+      active = Number(req.body.active) ? 1 : 0;
+    }
+    if (req.body && req.body.sort_order !== undefined) {
+      sort_order = Number(req.body.sort_order) || 0;
+    }
+    db.prepare('UPDATE banner_slides SET active = ?, sort_order = ? WHERE id = ?').run(
+      active,
+      sort_order,
+      id
+    );
+    const row = db
+      .prepare(
+        `SELECT id, image_path, active, sort_order, created_at FROM banner_slides WHERE id = ?`
+      )
+      .get(id);
+    res.json(mapBannerSlide(row));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.delete('/api/admin/banner-slides/:id', requireAdmin, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid id' });
+    }
+    const existing = db.prepare('SELECT * FROM banner_slides WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'မတွေ့ပါ' });
+    db.prepare('DELETE FROM banner_slides WHERE id = ?').run(id);
+    unlinkUploadRel(existing.image_path);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 app.post('/api/admin/branding/logo', requireAdmin, (req, res) => {

@@ -71,6 +71,7 @@
     loadSpinWins().catch(() => {});
     loadOrders();
     loadSettings();
+    loadBannerSlides().catch(() => {});
     loadChatThreads().catch(() => {});
     startChatBadgePoll();
   }
@@ -1137,6 +1138,101 @@
       wrap.classList.add('hidden');
       hint.textContent = 'MMQR မရှိသေးပါ';
     }
+  }
+
+  async function loadBannerSlides() {
+    const rows = await api('/api/admin/banner-slides');
+    loadBannerSlides._cache = rows;
+    const tbody = $('#bannerSlidesTable tbody');
+    if (!tbody) return rows;
+    tbody.innerHTML =
+      rows
+        .map((b) => {
+          const active = !!Number(b.active);
+          return `
+      <tr>
+        <td>${b.image_path || b.image_url ? `<img class="thumb-sm" src="${imgUrl(b.image_url || b.image_path)}" alt="" />` : '—'}</td>
+        <td>${Number(b.sort_order) || 0}</td>
+        <td>${active ? '<span class="badge paid_confirmed">active</span>' : '<span class="badge cancelled">inactive</span>'}</td>
+        <td class="row-actions">
+          <button type="button" class="btn btn-sm btn-outline" data-toggle-banner="${b.id}" data-active="${active ? 0 : 1}">${active ? 'ပိတ်မည်' : 'ဖွင့်မည်'}</button>
+          <button type="button" class="btn btn-sm btn-danger" data-del-banner="${b.id}">ဖျက်မည်</button>
+        </td>
+      </tr>`;
+        })
+        .join('') || '<tr><td colspan="4" class="empty">Banner ကြေငြာ မရှိသေးပါ</td></tr>';
+    return rows;
+  }
+
+  async function uploadBannerImage(file) {
+    if (!file) return;
+    if (!/^image\//.test(file.type || '')) {
+      toast('ပုံဖိုင်သာ တင်နိုင်သည်');
+      return;
+    }
+    const fd = new FormData();
+    fd.append('image', file);
+    const res = await fetch('/api/admin/banner-slides', {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: fd,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Banner တင်မရပါ');
+    await loadBannerSlides();
+    toast('Banner သိမ်းပြီး');
+  }
+
+  const newBannerBtn = $('#newBannerBtn');
+  const bannerImageFile = $('#bannerImageFile');
+  if (newBannerBtn && bannerImageFile) {
+    newBannerBtn.addEventListener('click', () => bannerImageFile.click());
+    bannerImageFile.addEventListener('change', async () => {
+      const file = bannerImageFile.files && bannerImageFile.files[0];
+      bannerImageFile.value = '';
+      if (!file) return;
+      try {
+        await uploadBannerImage(file);
+      } catch (err) {
+        toast(err.message);
+      }
+    });
+  }
+
+  const bannerSlidesTable = $('#bannerSlidesTable');
+  if (bannerSlidesTable) {
+    bannerSlidesTable.addEventListener('click', async (e) => {
+      const toggle = e.target.closest('[data-toggle-banner]');
+      if (toggle) {
+        const id = Number(toggle.dataset.toggleBanner);
+        const active = Number(toggle.dataset.active) ? 1 : 0;
+        try {
+          await api('/api/admin/banner-slides/' + id, {
+            method: 'PATCH',
+            body: JSON.stringify({ active }),
+          });
+          await loadBannerSlides();
+          toast(active ? 'Banner ဖွင့်ပြီး' : 'Banner ပိတ်ပြီး');
+        } catch (err) {
+          toast(err.message);
+        }
+        return;
+      }
+      const del = e.target.closest('[data-del-banner]');
+      if (del) {
+        if (!confirm('ဤ Banner ကို ဖျက်မည်လား?')) return;
+        try {
+          await api('/api/admin/banner-slides/' + del.dataset.delBanner, {
+            method: 'DELETE',
+            body: '{}',
+          });
+          await loadBannerSlides();
+          toast('Banner ဖျက်ပြီး');
+        } catch (err) {
+          toast(err.message);
+        }
+      }
+    });
   }
 
   async function loadSettings() {

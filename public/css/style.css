@@ -335,6 +335,12 @@ img { max-width: 100%; display: block; }
 .promo-slide-game .promo-meta .price {
   color: #f0abfc;
 }
+.promo-slide-custom {
+  cursor: default;
+}
+.promo-slide-custom .promo-media img {
+  object-fit: cover;
+}
 .promo-media img {
   width: 100%;
   height: 100%;

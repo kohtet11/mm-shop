@@ -3,6 +3,7 @@
   const MY_ORDERS_KEY = 'mm_shop_my_orders';
   const MY_ORDERS_MAX = 20;
   let products = [];
+  let customBannerSlides = [];
   let storeCategories = [];
   let productQuery = '';
   let productCategory = 'blind_box';
@@ -308,12 +309,23 @@
     renderCategoryChips();
   }
 
+  async function fetchBannerSlides() {
+    try {
+      const res = await fetch('/api/banner-slides');
+      const list = await res.json();
+      customBannerSlides = Array.isArray(list) ? list.filter((b) => Number(b.active) === 1) : [];
+    } catch (_) {
+      customBannerSlides = [];
+    }
+  }
+
   async function fetchProducts() {
     const res = await fetch('/api/products');
     const list = await res.json();
     products = Array.isArray(list)
       ? list.filter((p) => !Number(p && p.is_spin_credit))
       : [];
+    await fetchBannerSlides();
     renderPromoCarousel();
     renderProducts();
   }
@@ -373,6 +385,16 @@
       </button>`;
   }
 
+  function customBannerSlideHtml(b, active) {
+    const src = imgUrl(b.image_url || b.image_path);
+    return `
+      <button type="button" class="promo-slide promo-slide-custom${active ? ' active' : ''}" data-promo-banner="${b.id}" aria-label="Announcement banner">
+        <div class="promo-media">
+          <img src="${src}" alt="Announcement" loading="lazy" />
+        </div>
+      </button>`;
+  }
+
   function renderPromoCarousel() {
     const wrap = $('#promoCarousel');
     const track = $('#promoTrack');
@@ -381,12 +403,15 @@
 
     stopPromoTimer();
     const productSlides = products.filter((p) => Number(p.on_banner) === 1);
-    // Built-in Game slide is always available on home, merged with discount/banner products
-    const totalSlides = 1 + productSlides.length;
+    const customSlides = Array.isArray(customBannerSlides) ? customBannerSlides : [];
+    // Game + custom announcement banners + product on_banner slides
+    const totalSlides = 1 + customSlides.length + productSlides.length;
 
     wrap.hidden = false;
     wrap.classList.add('ready');
     promoIndex = 0;
+
+    const customHtml = customSlides.map((b) => customBannerSlideHtml(b, false)).join('');
 
     const productHtml = productSlides
       .map(
@@ -405,7 +430,7 @@
       )
       .join('');
 
-    track.innerHTML = gamePromoSlideHtml(true) + productHtml;
+    track.innerHTML = gamePromoSlideHtml(true) + customHtml + productHtml;
 
     dots.innerHTML = Array.from({ length: totalSlides }, (_, i) =>
       `<button type="button" class="promo-dot${i === 0 ? ' active' : ''}" data-promo-dot="${i}" aria-label="slide ${i + 1}"></button>`
@@ -737,6 +762,11 @@
       productCategory = catBtn.dataset.category || 'all';
       syncCategoryChips();
       renderProducts();
+      return;
+    }
+    const promoBanner = e.target.closest('[data-promo-banner]');
+    if (promoBanner) {
+      // Image-only announcement slide — click is a no-op
       return;
     }
     const promoGame = e.target.closest('[data-promo-category]');

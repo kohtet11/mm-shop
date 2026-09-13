@@ -246,6 +246,33 @@
           </form>
         </div>
 
+        <div class="admin-card" style="max-width:720px;margin-bottom:1.25rem">
+          <div class="flex-between" style="margin-bottom:0.75rem;gap:0.75rem;flex-wrap:wrap">
+            <h2 style="margin:0;font-size:1.1rem">Banner ကြေငြာ</h2>
+            <div class="row-actions" style="gap:0.5rem;align-items:center">
+              <input type="file" id="bannerImageFile" accept="image/*" class="hidden" />
+              <button type="button" class="btn btn-primary" id="newBannerBtn" title="Banner ပုံ အသစ်တင်မည်">+ ပုံတင်မည်</button>
+            </div>
+          </div>
+          <p class="hint" style="margin-top:0">
+            စတိုး promo carousel တွင် Game slide နှင့် product banner များနှင့်အတူ ပြမည့် ကြေငြာပုံများ။
+            ပုံသီးသန့်သာ — နှိပ်လျှင် action မရှိပါ။
+          </p>
+          <div class="admin-card table-wrap" style="padding:0;box-shadow:none;border:1px solid var(--border, #e5e7eb)">
+            <table class="data" id="bannerSlidesTable">
+              <thead>
+                <tr>
+                  <th>ပုံ</th>
+                  <th>အစဉ်</th>
+                  <th>အခြေအနေ</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="admin-card" style="max-width:520px">
           <h2 style="margin-top:0;font-size:1.1rem">စကားဝှက် ပြောင်းရန်</h2>
           <form id="passwordForm">
