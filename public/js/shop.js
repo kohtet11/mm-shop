@@ -6,6 +6,8 @@
   let cart = loadCart();
   let payment = null;
   let myOrdersPollTimer = null;
+  let promoTimer = null;
+  let promoIndex = 0;
 
   const $ = (sel, el = document) => el.querySelector(sel);
   const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -200,6 +202,7 @@
   async function fetchProducts() {
     const res = await fetch('/api/products');
     products = await res.json();
+    renderPromoCarousel();
     renderProducts();
   }
 
@@ -225,6 +228,98 @@
     renderPayment();
   }
 
+  function discountBadgeHtml(pct) {
+    const n = Number(pct) || 0;
+    if (n <= 0) return '';
+    return `<span class="discount-badge">${n}% OFF</span>`;
+  }
+
+  function renderPromoCarousel() {
+    const wrap = $('#promoCarousel');
+    const track = $('#promoTrack');
+    const dots = $('#promoDots');
+    if (!wrap || !track || !dots) return;
+
+    stopPromoTimer();
+    const slides = products.filter((p) => Number(p.on_banner) === 1);
+    if (!slides.length) {
+      wrap.hidden = true;
+      wrap.classList.remove('ready');
+      track.innerHTML = '';
+      dots.innerHTML = '';
+      return;
+    }
+
+    wrap.hidden = false;
+    wrap.classList.add('ready');
+    promoIndex = 0;
+
+    track.innerHTML = slides
+      .map(
+        (p, i) => `
+      <button type="button" class="promo-slide${i === 0 ? ' active' : ''}" data-promo-product="${p.id}" aria-label="${escapeHtml(p.name)}">
+        <div class="promo-media">
+          <img src="${imgUrl(p.image_path)}" alt="${escapeHtml(p.name)}" loading="lazy" />
+          ${discountBadgeHtml(p.discount_percent)}
+        </div>
+        <div class="promo-meta">
+          <strong>${escapeHtml(p.name)}</strong>
+          <span class="price">${formatMMK(p.price_mmk)}</span>
+        </div>
+      </button>`
+      )
+      .join('');
+
+    dots.innerHTML = slides
+      .map(
+        (_, i) =>
+          `<button type="button" class="promo-dot${i === 0 ? ' active' : ''}" data-promo-dot="${i}" aria-label="slide ${i + 1}"></button>`
+      )
+      .join('');
+
+    showPromoSlide(0);
+    if (slides.length > 1) startPromoTimer();
+  }
+
+  function bannerSlides() {
+    return products.filter((p) => Number(p.on_banner) === 1);
+  }
+
+  function showPromoSlide(idx) {
+    const slides = $$('.promo-slide');
+    const dots = $$('.promo-dot');
+    if (!slides.length) return;
+    promoIndex = ((idx % slides.length) + slides.length) % slides.length;
+    slides.forEach((el, i) => el.classList.toggle('active', i === promoIndex));
+    dots.forEach((el, i) => el.classList.toggle('active', i === promoIndex));
+  }
+
+  function startPromoTimer() {
+    stopPromoTimer();
+    promoTimer = setInterval(() => {
+      showPromoSlide(promoIndex + 1);
+    }, 4500);
+  }
+
+  function stopPromoTimer() {
+    if (promoTimer) {
+      clearInterval(promoTimer);
+      promoTimer = null;
+    }
+  }
+
+  function scrollToProduct(productId) {
+    const card = document.getElementById('product-' + productId);
+    if (!card) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.add('highlight');
+    setTimeout(() => card.classList.remove('highlight'), 1600);
+    const addBtn = card.querySelector('[data-add]');
+    if (addBtn) {
+      try { addBtn.focus({ preventScroll: true }); } catch (_) { addBtn.focus(); }
+    }
+  }
+
   function renderProducts() {
     const grid = $('#productsGrid');
     if (!products.length) {
@@ -234,8 +329,11 @@
     grid.innerHTML = products
       .map(
         (p) => `
-      <article class="product-card" data-id="${p.id}">
-        <img class="thumb" src="${imgUrl(p.image_path)}" alt="${escapeHtml(p.name)}" loading="lazy" />
+      <article class="product-card" id="product-${p.id}" data-id="${p.id}">
+        <div class="thumb-wrap">
+          <img class="thumb" src="${imgUrl(p.image_path)}" alt="${escapeHtml(p.name)}" loading="lazy" />
+          ${discountBadgeHtml(p.discount_percent)}
+        </div>
         <div class="body">
           <h3>${escapeHtml(p.name)}</h3>
           <div class="desc">${escapeHtml(p.description || '')}</div>
@@ -354,6 +452,27 @@
 
   // Events
   document.addEventListener('click', (e) => {
+    const promoSlide = e.target.closest('[data-promo-product]');
+    if (promoSlide) {
+      scrollToProduct(Number(promoSlide.dataset.promoProduct));
+      return;
+    }
+    const promoDot = e.target.closest('[data-promo-dot]');
+    if (promoDot) {
+      showPromoSlide(Number(promoDot.dataset.promoDot));
+      startPromoTimer();
+      return;
+    }
+    if (e.target.closest('#promoPrev')) {
+      showPromoSlide(promoIndex - 1);
+      startPromoTimer();
+      return;
+    }
+    if (e.target.closest('#promoNext')) {
+      showPromoSlide(promoIndex + 1);
+      startPromoTimer();
+      return;
+    }
     const add = e.target.closest('[data-add]');
     if (add) {
       addToCart(Number(add.dataset.add));

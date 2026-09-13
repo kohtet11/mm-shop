@@ -106,7 +106,13 @@
     const tbody = $('#productsTable tbody');
     tbody.innerHTML = products
       .map(
-        (p) => `
+        (p) => {
+          const pct = Number(p.discount_percent) || 0;
+          const bannerBits = [];
+          if (p.on_banner) bannerBits.push('<span class="badge paid_confirmed">Banner</span>');
+          if (pct > 0) bannerBits.push('<span class="badge pending">' + pct + '% OFF</span>');
+          const bannerCell = bannerBits.length ? bannerBits.join(' ') : '<span class="hint">—</span>';
+          return `
       <tr>
         <td>${p.image_path ? `<img class="thumb-sm" src="${imgUrl(p.image_path)}" alt="" />` : '—'}</td>
         <td>
@@ -114,14 +120,16 @@
           <div class="hint">${escapeHtml((p.description || '').slice(0, 80))}</div>
         </td>
         <td>${formatMMK(p.price_mmk)}</td>
+        <td>${bannerCell}</td>
         <td>${p.active ? '<span class="badge paid_confirmed">active</span>' : '<span class="badge cancelled">inactive</span>'}</td>
         <td class="row-actions">
           <button type="button" class="btn btn-sm btn-outline" data-edit-product="${p.id}">ပြင်မည်</button>
           <button type="button" class="btn btn-sm btn-danger" data-del-product="${p.id}">ဖျက်မည်</button>
         </td>
-      </tr>`
+      </tr>`;
+        }
       )
-      .join('') || '<tr><td colspan="5" class="empty">ပစ္စည်း မရှိသေးပါ</td></tr>';
+      .join('') || '<tr><td colspan="6" class="empty">ပစ္စည်း မရှိသေးပါ</td></tr>';
 
     loadProducts._cache = products;
   }
@@ -133,6 +141,19 @@
     $('#pPrice').value = product ? product.price_mmk : '';
     $('#pDesc').value = product ? product.description || '' : '';
     $('#pActive').checked = product ? !!product.active : true;
+    $('#pOnBanner').checked = product ? !!product.on_banner : false;
+    const pct = product ? String(Number(product.discount_percent) || 0) : '0';
+    const discSel = $('#pDiscount');
+    if (discSel) {
+      const hasOpt = [...discSel.options].some((o) => o.value === pct);
+      if (!hasOpt && pct !== '0') {
+        const opt = document.createElement('option');
+        opt.value = pct;
+        opt.textContent = pct + '%';
+        discSel.appendChild(opt);
+      }
+      discSel.value = pct;
+    }
     $('#pImage').value = '';
     $('#pImageHint').textContent = product && product.image_path
       ? 'လက်ရှိပုံ: ' + product.image_path
@@ -156,6 +177,8 @@
     fd.append('price_mmk', $('#pPrice').value);
     fd.append('description', $('#pDesc').value);
     fd.append('active', $('#pActive').checked ? '1' : '0');
+    fd.append('on_banner', $('#pOnBanner').checked ? '1' : '0');
+    fd.append('discount_percent', $('#pDiscount') ? $('#pDiscount').value : '0');
     if ($('#pImage').files[0]) fd.append('image', $('#pImage').files[0]);
 
     try {

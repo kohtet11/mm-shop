@@ -83,6 +83,8 @@ function createTables(database) {
       description TEXT DEFAULT '',
       image_path TEXT DEFAULT '',
       active INTEGER DEFAULT 1,
+      on_banner INTEGER DEFAULT 0,
+      discount_percent INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -123,6 +125,28 @@ function createTables(database) {
   `);
 }
 
+
+function migrateProductsColumns(database) {
+  const cols = database.prepare('PRAGMA table_info(products)').all().map((c) => c.name);
+  if (!cols.includes('on_banner')) {
+    database.exec('ALTER TABLE products ADD COLUMN on_banner INTEGER DEFAULT 0');
+  }
+  if (!cols.includes('discount_percent')) {
+    database.exec('ALTER TABLE products ADD COLUMN discount_percent INTEGER DEFAULT 0');
+  }
+}
+
+function clampDiscountPercent(value) {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(90, n);
+}
+
+function parseOnBanner(value, fallback = 0) {
+  if (value === undefined || value === null || value === '') return fallback;
+  return value === '0' || value === 0 || value === false || value === 'false' ? 0 : 1;
+}
+
 function seedIfEmpty(database) {
   const count = database.prepare('SELECT COUNT(*) AS c FROM products').get().c;
   if (count > 0) return;
@@ -152,11 +176,11 @@ function seedIfEmpty(database) {
   ];
 
   const insert = database.prepare(
-    `INSERT INTO products (name, price_mmk, description, image_path, active)
-     VALUES (?, ?, ?, ?, 1)`
+    `INSERT INTO products (name, price_mmk, description, image_path, active, on_banner, discount_percent)
+     VALUES (?, ?, ?, ?, 1, ?, ?)`
   );
 
-  for (const p of placeholders) {
+  placeholders.forEach((p, idx) => {
     const svgPath = path.join(PRODUCTS_DIR, p.file);
     if (!fs.existsSync(svgPath)) {
       fs.writeFileSync(
@@ -165,8 +189,11 @@ function seedIfEmpty(database) {
         'utf8'
       );
     }
-    insert.run(p.name, p.price, p.desc, `products/${p.file}`);
-  }
+    // Demo: first sample product on banner with 15% OFF
+    const onBanner = idx === 0 ? 1 : 0;
+    const discount = idx === 0 ? 15 : 0;
+    insert.run(p.name, p.price, p.desc, `products/${p.file}`, onBanner, discount);
+  });
 
   const settingsDefaults = [
     ['bank_name', 'KBZ Bank'],
@@ -482,7 +509,7 @@ function formatOrder(row, items) {
 app.get('/api/products', (_req, res) => {
   const products = db
     .prepare(
-      `SELECT id, name, price_mmk, description, image_path, active
+      `SELECT id, name, price_mmk, description, image_path, active, on_banner, discount_percent
        FROM products WHERE active = 1 ORDER BY id DESC`
     )
     .all();
@@ -683,7 +710,7 @@ app.get('/api/admin/me', (req, res) => {
 app.get('/api/admin/products', requireAdmin, (_req, res) => {
   const products = db
     .prepare(
-      `SELECT id, name, price_mmk, description, image_path, active, created_at, updated_at
+      `SELECT id, name, price_mmk, description, image_path, active, on_banner, discount_percent, created_at, updated_at
        FROM products ORDER BY id DESC`
     )
     .all();
@@ -694,23 +721,27 @@ app.post('/api/admin/products', requireAdmin, (req, res) => {
   uploadProduct.single('image')(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message });
     try {
-      const { name, price_mmk, description, active } = req.body;
+      const { name, price_mmk, description, active, on_banner, discount_percent } = req.body;
       if (!name || price_mmk === undefined) {
         return res.status(400).json({ error: 'name and price required' });
       }
       const image_path = req.file ? `products/${req.file.filename}` : '';
       const isActive = active === '0' || active === 0 || active === false ? 0 : 1;
+      const isBanner = parseOnBanner(on_banner, 0);
+      const discount = clampDiscountPercent(discount_percent);
       const result = db
         .prepare(
-          `INSERT INTO products (name, price_mmk, description, image_path, active)
-           VALUES (?, ?, ?, ?, ?)`
+          `INSERT INTO products (name, price_mmk, description, image_path, active, on_banner, discount_percent)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           String(name).trim(),
           parseInt(price_mmk, 10) || 0,
           description ? String(description) : '',
           image_path,
-          isActive
+          isActive,
+          isBanner,
+          discount
         );
       const product = db.prepare('SELECT * FROM products WHERE id = ?').get(result.lastInsertRowid);
       res.json(product);
@@ -729,7 +760,7 @@ app.put('/api/admin/products/:id', requireAdmin, (req, res) => {
       const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
       if (!existing) return res.status(404).json({ error: 'Not found' });
 
-      const { name, price_mmk, description, active } = req.body;
+      const { name, price_mmk, description, active, on_banner, discount_percent } = req.body;
       let image_path = existing.image_path;
       if (req.file) {
         image_path = `products/${req.file.filename}`;
@@ -741,16 +772,24 @@ app.put('/api/admin/products/:id', requireAdmin, (req, res) => {
           : active === '0' || active === 0 || active === false || active === 'false'
             ? 0
             : 1;
+      const isBanner =
+        on_banner === undefined ? (existing.on_banner || 0) : parseOnBanner(on_banner, 0);
+      const discount =
+        discount_percent === undefined
+          ? (existing.discount_percent || 0)
+          : clampDiscountPercent(discount_percent);
 
       db.prepare(
         `UPDATE products SET name = ?, price_mmk = ?, description = ?, image_path = ?,
-         active = ?, updated_at = datetime('now') WHERE id = ?`
+         active = ?, on_banner = ?, discount_percent = ?, updated_at = datetime('now') WHERE id = ?`
       ).run(
         name !== undefined ? String(name).trim() : existing.name,
         price_mmk !== undefined ? parseInt(price_mmk, 10) || 0 : existing.price_mmk,
         description !== undefined ? String(description) : existing.description,
         image_path,
         isActive,
+        isBanner,
+        discount,
         id
       );
 
@@ -1006,6 +1045,7 @@ async function start() {
   }
 
   createTables(db);
+  migrateProductsColumns(db);
   seedIfEmpty(db);
   ensureDefaultSettings(db);
 
