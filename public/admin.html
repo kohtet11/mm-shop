@@ -29,6 +29,7 @@
       <div class="brand" id="adminBrand">MM Shop Admin</div>
       <div class="nav-links">
         <a href="#products" data-tab="products" class="active">ပစ္စည်းများ</a>
+        <a href="#spin" data-tab="spin">စပင်ဘီး</a>
         <a href="#orders" data-tab="orders">အော်ဒါများ</a>
         <a href="#settings" data-tab="settings">ဆက်တင်</a>
       </div>
@@ -53,6 +54,31 @@
                 <th>အမည်</th>
                 <th>ဈေး</th>
                 <th>Banner / %</th>
+                <th>အခြေအနေ</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+
+      <!-- Spin wheel -->
+      <section id="tab-spin" class="tab-panel hidden">
+        <div class="flex-between" style="margin-bottom:1rem">
+          <h1 style="margin:0">စပင်ဘီး</h1>
+          <button type="button" class="btn btn-primary" id="newSpinBtn">+ ဆုအသစ်</button>
+        </div>
+        <p class="hint" style="margin-top:0">N = ဘယ်နှကြိမ် တစ်ခါကျ — အလေးချိန် = 1/N (normalize လုပ်ပြီး ရွေးမည်). Public API တွင် hit_every မပေါ်ပါ။</p>
+        <div class="admin-card table-wrap">
+          <table class="data" id="spinTable">
+            <thead>
+              <tr>
+                <th>အမည်</th>
+                <th>ပစ္စည်း</th>
+                <th>အလေးချိန်</th>
+                <th>အစဉ်</th>
                 <th>အခြေအနေ</th>
                 <th></th>
               </tr>
@@ -223,6 +249,17 @@
           </select>
           <div class="hint">စျေးနှုန်းသည် လက်ရှိရောင်းဈေး — badge တွင် % OFF ပြမည်</div>
         </div>
+
+        <div class="form-group" style="border-top:1px dashed var(--border);padding-top:0.85rem;margin-top:0.5rem">
+          <label>
+            <input type="checkbox" id="pSpinAdd" /> ဘီးတွင် ထည့်မည်
+          </label>
+          <div id="pSpinFields" class="hidden" style="margin-top:0.5rem">
+            <label for="pSpinHit">ဘယ်နှကြိမ် တစ်ခါကျ (N)</label>
+            <input id="pSpinHit" type="number" min="1" step="1" value="10" />
+            <div class="hint" id="pSpinHint">ပစ္စည်းအမည်ဖြင့် စပင်ဘီး entry အသစ်/အပ်ဒိတ် လုပ်မည်</div>
+          </div>
+        </div>
         <button type="submit" class="btn btn-primary" style="width:100%">သိမ်းမည်</button>
       </form>
     </div>
@@ -239,6 +276,45 @@
     </div>
   </div>
 
+
+
+  <!-- Spin prize modal -->
+  <div class="overlay" id="spinModal">
+    <div class="panel">
+      <div class="panel-header">
+        <h2 id="spinModalTitle">စပင်ဘီး ဆု</h2>
+        <button type="button" class="close-x" id="closeSpinModal">×</button>
+      </div>
+      <form id="spinForm">
+        <input type="hidden" id="spinId" />
+        <div class="form-group">
+          <label for="spinName">ပြသမည့် အမည် (ဘီးပေါ်) *</label>
+          <input id="spinName" required maxlength="120" placeholder="ဥပမာ — ၁၀% လျှော့ / အခမဲ့ ပို့ဆောင်" />
+        </div>
+        <div class="form-group">
+          <label for="spinProduct">ချိတ်ဆက် ပစ္စည်း (ရွေးချယ်နိုင်)</label>
+          <select id="spinProduct">
+            <option value="">— မချိတ် —</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="spinHitEvery">ဘယ်နှကြိမ် တစ်ခါကျ (N) *</label>
+          <input id="spinHitEvery" type="number" min="1" step="1" value="10" required />
+          <div class="hint">အလေးချိန် = 1/N — ဥပမာ N=10 → 1/10၊ N=5 → 1/5 (ပိုများကျ)</div>
+        </div>
+        <div class="form-group">
+          <label for="spinSort">အစဉ် (sort order)</label>
+          <input id="spinSort" type="number" step="1" value="0" />
+        </div>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="spinActive" checked /> Active (စတိုးတွင် ပြမည်)
+          </label>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%">သိမ်းမည်</button>
+      </form>
+    </div>
+  </div>
 
   <!-- Password confirm for delete -->
   <div class="overlay" id="passwordConfirmModal">

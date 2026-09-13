@@ -8,6 +8,17 @@
   let myOrdersPollTimer = null;
   let promoTimer = null;
   let promoIndex = 0;
+  let spinPrizes = [];
+  let spinRotation = 0;
+  let spinBusy = false;
+  let spinCredits = 0;
+  let spinUnlockedOrderId = '';
+  let spinUnlockedPhone = '';
+  const SPIN_COLORS = [
+    '#7c3aed', '#a855f7', '#c026d3', '#db2777',
+    '#6366f1', '#8b5cf6', '#ec4899', '#4f46e5',
+  ];
+  const SPIN_SESSION_KEY = 'mm_shop_spin_unlock';
 
   const $ = (sel, el = document) => el.querySelector(sel);
   const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -589,7 +600,321 @@
     }
   });
 
+
+  // ========== Spin wheel ==========
+
+  function loadSpinSession() {
+    try {
+      const s = JSON.parse(sessionStorage.getItem(SPIN_SESSION_KEY) || 'null');
+      if (s && s.orderId && s.phone) {
+        spinUnlockedOrderId = String(s.orderId);
+        spinUnlockedPhone = String(s.phone);
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  function saveSpinSession() {
+    if (!spinUnlockedOrderId || !spinUnlockedPhone) {
+      sessionStorage.removeItem(SPIN_SESSION_KEY);
+      return;
+    }
+    sessionStorage.setItem(
+      SPIN_SESSION_KEY,
+      JSON.stringify({ orderId: spinUnlockedOrderId, phone: spinUnlockedPhone })
+    );
+  }
+
+  async function fetchSpinPrizes() {
+    try {
+      const res = await fetch('/api/spin/prizes');
+      if (!res.ok) throw new Error('spin fetch failed');
+      spinPrizes = await res.json();
+    } catch (_) {
+      spinPrizes = [];
+    }
+    renderSpinSection();
+    if (spinPrizes.length && loadSpinSession()) {
+      const oidEl = $('#spinOrderId');
+      const phEl = $('#spinPhone');
+      if (oidEl) oidEl.value = spinUnlockedOrderId;
+      if (phEl) phEl.value = spinUnlockedPhone;
+      await unlockSpin(true);
+    }
+  }
+
+  function renderSpinSection() {
+    const section = $('#spinSection');
+    if (!section) return;
+    if (!spinPrizes.length) {
+      section.hidden = true;
+      return;
+    }
+    section.hidden = false;
+    drawSpinWheel(spinRotation);
+    updateSpinButton();
+  }
+
+  function updateSpinButton() {
+    const btn = $('#spinBtn');
+    const hint = $('#spinHint');
+    if (!btn) return;
+    const n = Math.max(0, Number(spinCredits) || 0);
+    btn.textContent = 'ကံစမ်းမည် (' + n + ')';
+    const canSpin = n >= 1 && !spinBusy && !!spinUnlockedOrderId;
+    btn.disabled = !canSpin;
+    btn.classList.toggle('ready', canSpin);
+    btn.classList.toggle('dimmed', !canSpin);
+    if (hint) {
+      if (spinBusy) hint.textContent = 'လှည့်နေသည်…';
+      else if (!spinUnlockedOrderId) {
+        hint.textContent = 'အော်ဒါနံပါတ်နှင့် ဖုန်းထည့်ပြီး ကံစမ်းခွင့် စစ်ပါ';
+      } else if (n < 1) {
+        hint.textContent = 'ကံစမ်းခွင့် ကုန်သွားပါပြီ — Admin ထံ ဆက်သွယ်ပါ';
+      } else {
+        hint.textContent = 'ကျန်ရှိသော အခွင့်: ' + n;
+      }
+    }
+  }
+
+  function drawSpinWheel(rotationDeg) {
+    const canvas = $('#spinCanvas');
+    if (!canvas || !spinPrizes.length) return;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const parentW = (canvas.parentElement && canvas.parentElement.clientWidth) || 360;
+    const cssSize = Math.min(360, Math.floor(parentW * 0.92));
+    const size = Math.max(240, cssSize);
+    if (canvas.width !== size * dpr || canvas.height !== size * dpr) {
+      canvas.width = size * dpr;
+      canvas.height = size * dpr;
+      canvas.style.width = size + 'px';
+      canvas.style.height = size + 'px';
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const cx = size / 2;
+    const cy = size / 2;
+    const radius = size / 2 - 6;
+    const n = spinPrizes.length;
+    const arc = (Math.PI * 2) / n;
+
+    ctx.clearRect(0, 0, size, size);
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate((rotationDeg * Math.PI) / 180);
+    ctx.translate(-cx, -cy);
+
+    for (let i = 0; i < n; i++) {
+      const startA = i * arc - Math.PI / 2;
+      const endA = startA + arc;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, radius, startA, endA);
+      ctx.closePath();
+      ctx.fillStyle = SPIN_COLORS[i % SPIN_COLORS.length];
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      const label = String(spinPrizes[i].name || '');
+      const mid = startA + arc / 2;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(mid);
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#fff';
+      ctx.shadowColor = 'rgba(0,0,0,0.55)';
+      ctx.shadowBlur = 4;
+      const maxLen = radius - 28;
+      const fontSize = Math.min(15, Math.max(9, Math.floor(radius / (n > 8 ? 14 : 11))));
+      ctx.font = '600 ' + fontSize + 'px "Noto Sans Myanmar","Pyidaungsu",system-ui,sans-serif';
+      let t = label;
+      while (ctx.measureText(t).width > maxLen && t.length > 1) t = t.slice(0, -1);
+      if (t !== label && t.length > 2) t = t.slice(0, -1) + '…';
+      ctx.fillText(t, radius - 12, 0);
+      ctx.restore();
+    }
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(22, radius * 0.12), 0, Math.PI * 2);
+    ctx.fillStyle = '#0f0a1a';
+    ctx.fill();
+    ctx.strokeStyle = '#c4b5fd';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = '#e9d5ff';
+    ctx.font = '700 ' + Math.max(10, Math.floor(radius * 0.08)) + 'px system-ui,sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowBlur = 0;
+    ctx.fillText('SPIN', cx, cy);
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(168, 85, 247, 0.9)';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function animateSpinTo(targetIndex, durationMs) {
+    return new Promise((resolve) => {
+      const n = spinPrizes.length;
+      const arcDeg = 360 / n;
+      const segmentCenterFromStart = targetIndex * arcDeg + arcDeg / 2;
+      const base = -segmentCenterFromStart;
+      const current = ((spinRotation % 360) + 360) % 360;
+      const baseNorm = ((base % 360) + 360) % 360;
+      const adjust = (baseNorm - current + 360) % 360;
+      const extra = 360 * (5 + Math.floor(Math.random() * 3));
+      const targetRot = spinRotation + extra + adjust;
+      const startRot = spinRotation;
+      const t0 = performance.now();
+
+      function easeOutCubic(t) {
+        return 1 - Math.pow(1 - t, 3);
+      }
+
+      function frame(now) {
+        const t = Math.min(1, (now - t0) / durationMs);
+        spinRotation = startRot + (targetRot - startRot) * easeOutCubic(t);
+        drawSpinWheel(spinRotation);
+        if (t < 1) requestAnimationFrame(frame);
+        else {
+          spinRotation = targetRot;
+          drawSpinWheel(spinRotation);
+          resolve();
+        }
+      }
+      requestAnimationFrame(frame);
+    });
+  }
+
+  async function unlockSpin(silent) {
+    const orderId = ($('#spinOrderId') && $('#spinOrderId').value.trim()) || spinUnlockedOrderId;
+    const phone = ($('#spinPhone') && $('#spinPhone').value.trim()) || spinUnlockedPhone;
+    const msg = $('#spinUnlockMsg');
+    if (!orderId || !phone) {
+      if (msg && !silent) msg.textContent = 'အော်ဒါနံပါတ်နှင့် ဖုန်း ထည့်ပါ';
+      return;
+    }
+    try {
+      const res = await fetch('/api/spin/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId, phone }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'မတွေ့ပါ');
+      spinUnlockedOrderId = data.orderId || orderId;
+      spinUnlockedPhone = phone;
+      spinCredits = Number(data.spinCredits) || 0;
+      saveSpinSession();
+      if (msg) {
+        msg.textContent =
+          spinCredits >= 1
+            ? 'ကံစမ်းခွင့် ' + spinCredits + ' ကြိမ် ရှိသည် — ခလုတ် လင်းနေသည်'
+            : 'အော်ဒါတွေ့ပါပြီ — ကံစမ်းခွင့် 0 (Admin က ထည့်ပေးမှ လှည့်နိုင်သည်)';
+        msg.classList.toggle('ok', spinCredits >= 1);
+      }
+      updateSpinButton();
+    } catch (err) {
+      spinCredits = 0;
+      spinUnlockedOrderId = '';
+      spinUnlockedPhone = '';
+      saveSpinSession();
+      if (msg) {
+        msg.textContent = err.message || 'မရရှိနိုင်ပါ';
+        msg.classList.remove('ok');
+      }
+      updateSpinButton();
+    }
+  }
+
+  async function doSpin() {
+    if (spinBusy || !spinPrizes.length) return;
+    if (!spinUnlockedOrderId || !spinUnlockedPhone || spinCredits < 1) {
+      updateSpinButton();
+      toast('ကံစမ်းခွင့် မရှိပါ');
+      return;
+    }
+    spinBusy = true;
+    updateSpinButton();
+    try {
+      const res = await fetch('/api/spin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: spinUnlockedOrderId,
+          phone: spinUnlockedPhone,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (typeof data.spinCredits === 'number') spinCredits = data.spinCredits;
+        throw new Error(data.error || 'လှည့်မရပါ');
+      }
+      if (typeof data.spinCredits === 'number') spinCredits = data.spinCredits;
+
+      let idx = spinPrizes.findIndex((p) => p.id === data.prizeId);
+      if (idx < 0) {
+        const r2 = await fetch('/api/spin/prizes');
+        if (r2.ok) spinPrizes = await r2.json();
+        drawSpinWheel(spinRotation);
+        idx = spinPrizes.findIndex((p) => p.id === data.prizeId);
+      }
+      if (idx < 0) throw new Error('ဆု မတွေ့ပါ');
+
+      await animateSpinTo(idx, 4200);
+      showSpinResult(data);
+      const msg = $('#spinUnlockMsg');
+      if (msg) {
+        msg.textContent = 'ကျန်ရှိသော အခွင့်: ' + spinCredits;
+        msg.classList.toggle('ok', spinCredits >= 1);
+      }
+    } catch (err) {
+      toast(err.message || 'အမှားဖြစ်နေသည်');
+    } finally {
+      spinBusy = false;
+      updateSpinButton();
+    }
+  }
+
+  function showSpinResult(data) {
+    $('#spinResultName').textContent = data.name || '';
+    const btn = $('#spinResultProductBtn');
+    if (data.productId) {
+      btn.classList.remove('hidden');
+      btn.onclick = () => {
+        closeOverlay('spinResultOverlay');
+        scrollToProduct(Number(data.productId));
+      };
+    } else {
+      btn.classList.add('hidden');
+      btn.onclick = null;
+    }
+    openOverlay('spinResultOverlay');
+  }
+
+  const spinBtn = $('#spinBtn');
+  if (spinBtn) spinBtn.addEventListener('click', () => doSpin());
+  const unlockBtn = $('#spinUnlockBtn');
+  if (unlockBtn) unlockBtn.addEventListener('click', () => unlockSpin(false));
+
+  document.addEventListener('click', (e) => {
+    if (e.target === $('#spinResultOverlay')) closeOverlay('spinResultOverlay');
+  });
+
+  window.addEventListener('resize', () => {
+    if (!spinPrizes.length) return;
+    drawSpinWheel(spinRotation);
+  });
+
   updateCartCount();
   fetchProducts();
   fetchPayment();
+  fetchSpinPrizes();
 })();

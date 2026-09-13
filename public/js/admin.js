@@ -66,6 +66,7 @@
     $('#loginView').classList.add('hidden');
     $('#dashView').classList.remove('hidden');
     loadProducts();
+    loadSpinPrizes().catch(() => {});
     loadOrders();
     loadSettings();
   }
@@ -134,6 +135,31 @@
     loadProducts._cache = products;
   }
 
+  function syncProductSpinFields(product) {
+    const add = $('#pSpinAdd');
+    const fields = $('#pSpinFields');
+    const hit = $('#pSpinHit');
+    const hint = $('#pSpinHint');
+    if (!add || !fields || !hit) return;
+    const prizes = loadSpinPrizes._cache || [];
+    const linked = product
+      ? prizes.find((s) => s.product_id && Number(s.product_id) === Number(product.id))
+      : null;
+    if (linked) {
+      add.checked = true;
+      fields.classList.remove('hidden');
+      hit.value = String(linked.hit_every || 10);
+      hint.textContent = 'လက်ရှိဘီး entry #' + linked.id + ' — သိမ်းရင် အပ်ဒိတ်လုပ်မည်';
+      add.dataset.spinId = String(linked.id);
+    } else {
+      add.checked = false;
+      fields.classList.add('hidden');
+      hit.value = '10';
+      hint.textContent = 'ပစ္စည်းအမည်ဖြင့် စပင်ဘီး entry အသစ် ထည့်မည်';
+      delete add.dataset.spinId;
+    }
+  }
+
   function openProductModal(product) {
     $('#productModalTitle').textContent = product ? 'ပစ္စည်း ပြင်ဆင်ရန်' : 'ပစ္စည်း အသစ်';
     $('#productId').value = product ? product.id : '';
@@ -158,7 +184,16 @@
     $('#pImageHint').textContent = product && product.image_path
       ? 'လက်ရှိပုံ: ' + product.image_path
       : '';
+    syncProductSpinFields(product);
     $('#productModal').classList.add('open');
+  }
+
+  const pSpinAddEl = $('#pSpinAdd');
+  if (pSpinAddEl) {
+    pSpinAddEl.addEventListener('change', () => {
+      const fields = $('#pSpinFields');
+      if (fields) fields.classList.toggle('hidden', !pSpinAddEl.checked);
+    });
   }
 
   $('#newProductBtn').addEventListener('click', () => openProductModal(null));
@@ -182,8 +217,9 @@
     if ($('#pImage').files[0]) fd.append('image', $('#pImage').files[0]);
 
     try {
+      let saved = null;
       if (id) {
-        await fetch('/api/admin/products/' + id, {
+        saved = await fetch('/api/admin/products/' + id, {
           method: 'PUT',
           credentials: 'same-origin',
           body: fd,
@@ -193,7 +229,7 @@
           return data;
         });
       } else {
-        await fetch('/api/admin/products', {
+        saved = await fetch('/api/admin/products', {
           method: 'POST',
           credentials: 'same-origin',
           body: fd,
@@ -205,7 +241,35 @@
       }
       $('#productModal').classList.remove('open');
       toast('သိမ်းပြီးပါပြီ');
-      loadProducts();
+      await loadProducts();
+      try {
+        const addEl = $('#pSpinAdd');
+        if (addEl && addEl.checked && saved && saved.id) {
+          const hitEvery = Math.max(1, parseInt($('#pSpinHit').value, 10) || 10);
+          const spinId = addEl.dataset.spinId;
+          const payload = {
+            name: String(saved.name || $('#pName').value.trim()),
+            product_id: saved.id,
+            hit_every: hitEvery,
+            active: 1,
+            sort_order: 0,
+          };
+          if (spinId) {
+            await api('/api/admin/spin-prizes/' + spinId, {
+              method: 'PUT',
+              body: JSON.stringify(payload),
+            });
+          } else {
+            await api('/api/admin/spin-prizes', {
+              method: 'POST',
+              body: JSON.stringify(payload),
+            });
+          }
+          await loadSpinPrizes();
+        }
+      } catch (spinErr) {
+        toast('ပစ္စည်းသိမ်းပြီး — ဘီး sync မရ: ' + (spinErr.message || ''));
+      }
     } catch (err) {
       toast(err.message);
     }
@@ -334,6 +398,7 @@
         <td>
           <strong>${escapeHtml(o.order_id)}</strong>
           <div class="hint">${escapeHtml(o.created_at || '')}</div>
+          <div class="hint">ဘီးအခွင့်: ${Number(o.spin_credits) || 0}</div>
         </td>
         <td>
           ${escapeHtml(o.customer_name)}<br/>
@@ -366,6 +431,16 @@
       )
       .join('');
 
+    const playsList =
+      (o.spin_plays || [])
+        .map(
+          (p) =>
+            `<li>${escapeHtml(p.prize_name)} <span class="hint">(${escapeHtml(
+              p.created_at || ''
+            )})</span></li>`
+        )
+        .join('') || '<li class="hint">မရှိသေးပါ</li>';
+
     $('#orderDetail').innerHTML = `
       <p><strong>အော်ဒါ:</strong> ${escapeHtml(o.order_id)}</p>
       <p><strong>အမည်:</strong> ${escapeHtml(o.customer_name)}</p>
@@ -387,16 +462,26 @@
             .join('')}
         </select>
       </div>
+      <div class="form-group">
+        <label for="orderSpinCredits">စပင်ဘီး ကံစမ်းခွင့် (spin_credits)</label>
+        <input id="orderSpinCredits" type="number" min="0" step="1" value="${Number(o.spin_credits) || 0}" />
+        <div class="hint">စလစ်/ငွေပေးချေမှုအရ အခွင့် အရေအတွက် သတ်မှတ်ပါ (ဥပမာ ၁ ကြိမ် = 1)</div>
+      </div>
       <div class="row-actions" style="gap:0.5rem;flex-wrap:wrap;margin-bottom:0.75rem">
         <button type="button" class="btn btn-primary btn-sm" id="saveStatusBtn" data-oid="${escapeHtml(
         o.order_id
       )}">အခြေအနေ သိမ်းမည်</button>
+        <button type="button" class="btn btn-pink btn-sm" id="saveSpinCreditsBtn" data-oid="${escapeHtml(
+        o.order_id
+      )}">ကံစမ်းခွင့် သိမ်းမည်</button>
         <button type="button" class="btn btn-danger btn-sm" id="deleteOrderBtn" data-oid="${escapeHtml(
         o.order_id
       )}">ဖျက်မည်</button>
       </div>
       <h3 style="margin-bottom:0.35rem">ပစ္စည်းများ</h3>
       <ul>${itemsHtml || '<li>—</li>'}</ul>
+      <h3 style="margin-bottom:0.35rem">စပင်မှတ်တမ်း</h3>
+      <ul>${playsList}</ul>
       <h3 style="margin-bottom:0.35rem">ငွေလွှဲစလစ်</h3>
       ${
         o.slip_path
@@ -415,6 +500,21 @@
           body: JSON.stringify({ status: $('#orderStatus').value }),
         });
         toast('အခြေအနေ ပြောင်းပြီး');
+        loadOrders();
+        openOrder(o.order_id);
+      } catch (err) {
+        toast(err.message);
+      }
+    };
+
+    $('#saveSpinCreditsBtn').onclick = async () => {
+      try {
+        const credits = Math.max(0, parseInt($('#orderSpinCredits').value, 10) || 0);
+        await api('/api/admin/orders/' + encodeURIComponent(o.order_id) + '/spin-credits', {
+          method: 'PATCH',
+          body: JSON.stringify({ spin_credits: credits }),
+        });
+        toast('ကံစမ်းခွင့် သိမ်းပြီး');
         loadOrders();
         openOrder(o.order_id);
       } catch (err) {
@@ -605,6 +705,134 @@
       toast('စကားဝှက် ပြောင်းပြီးပါပြီ');
     } catch (err) {
       toast(err.message);
+    }
+  });
+
+
+  // ========== Spin prizes ==========
+
+  async function loadSpinPrizes() {
+    const prizes = await api('/api/admin/spin-prizes');
+    loadSpinPrizes._cache = prizes;
+    const tbody = $('#spinTable tbody');
+    if (!tbody) return prizes;
+    tbody.innerHTML =
+      prizes
+        .map((s) => {
+          const prod = s.product_name
+            ? escapeHtml(s.product_name)
+            : '<span class="hint">—</span>';
+          return `
+      <tr>
+        <td><strong>${escapeHtml(s.name)}</strong></td>
+        <td>${prod}</td>
+        <td><code>1/${Number(s.hit_every) || 1}</code></td>
+        <td>${Number(s.sort_order) || 0}</td>
+        <td>${s.active ? '<span class="badge paid_confirmed">active</span>' : '<span class="badge cancelled">inactive</span>'}</td>
+        <td class="row-actions">
+          <button type="button" class="btn btn-sm btn-outline" data-edit-spin="${s.id}">ပြင်မည်</button>
+          <button type="button" class="btn btn-sm btn-danger" data-del-spin="${s.id}">ဖျက်မည်</button>
+        </td>
+      </tr>`;
+        })
+        .join('') || '<tr><td colspan="6" class="empty">ဆု မရှိသေးပါ — စတိုးတွင် စပင်ဘီး ပုန်းနေမည်</td></tr>';
+    return prizes;
+  }
+
+  async function fillSpinProductOptions(selectedId) {
+    const sel = $('#spinProduct');
+    if (!sel) return;
+    let products = loadProducts._cache;
+    if (!products) {
+      try {
+        products = await api('/api/admin/products');
+        loadProducts._cache = products;
+      } catch {
+        products = [];
+      }
+    }
+    sel.innerHTML =
+      '<option value="">— မချိတ် —</option>' +
+      products
+        .map(
+          (p) =>
+            `<option value="${p.id}"${
+              selectedId && Number(selectedId) === Number(p.id) ? ' selected' : ''
+            }>${escapeHtml(p.name)}</option>`
+        )
+        .join('');
+  }
+
+  async function openSpinModal(prize) {
+    $('#spinModalTitle').textContent = prize ? 'ဆု ပြင်ဆင်ရန်' : 'ဆု အသစ်';
+    $('#spinId').value = prize ? prize.id : '';
+    $('#spinName').value = prize ? prize.name : '';
+    $('#spinHitEvery').value = prize ? prize.hit_every : 10;
+    $('#spinSort').value = prize ? prize.sort_order : 0;
+    $('#spinActive').checked = prize ? !!prize.active : true;
+    await fillSpinProductOptions(prize ? prize.product_id : '');
+    $('#spinModal').classList.add('open');
+  }
+
+  $('#newSpinBtn').addEventListener('click', () => openSpinModal(null));
+  $('#closeSpinModal').addEventListener('click', () =>
+    $('#spinModal').classList.remove('open')
+  );
+  $('#spinModal').addEventListener('click', (e) => {
+    if (e.target === $('#spinModal')) $('#spinModal').classList.remove('open');
+  });
+
+  $('#spinForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = $('#spinId').value;
+    const payload = {
+      name: $('#spinName').value.trim(),
+      product_id: $('#spinProduct').value || null,
+      hit_every: Math.max(1, parseInt($('#spinHitEvery').value, 10) || 1),
+      sort_order: parseInt($('#spinSort').value, 10) || 0,
+      active: $('#spinActive').checked ? 1 : 0,
+    };
+    try {
+      if (id) {
+        await api('/api/admin/spin-prizes/' + id, {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await api('/api/admin/spin-prizes', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+      }
+      $('#spinModal').classList.remove('open');
+      toast('စပင်ဘီး သိမ်းပြီး');
+      loadSpinPrizes();
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+
+  document.addEventListener('click', async (e) => {
+    const edit = e.target.closest('[data-edit-spin]');
+    if (edit) {
+      const id = Number(edit.dataset.editSpin);
+      const prize = (loadSpinPrizes._cache || []).find((s) => s.id === id);
+      if (prize) openSpinModal(prize);
+      return;
+    }
+    const del = e.target.closest('[data-del-spin]');
+    if (del) {
+      if (!confirm('ဤဆုကို ဖျက်မည်လား?')) return;
+      try {
+        await api('/api/admin/spin-prizes/' + del.dataset.delSpin, {
+          method: 'DELETE',
+          body: '{}',
+        });
+        toast('ဖျက်ပြီး');
+        loadSpinPrizes();
+      } catch (err) {
+        toast(err.message);
+      }
     }
   });
 

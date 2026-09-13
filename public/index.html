@@ -30,6 +30,35 @@
       <button type="button" class="promo-nav promo-next" id="promoNext" aria-label="နောက်">›</button>
       <div class="promo-dots" id="promoDots"></div>
     </section>
+
+    <section class="spin-section" id="spinSection" hidden aria-label="စပင်ဘီး လှည့်ရန်">
+      <div class="spin-card">
+        <div class="spin-heading">
+          <h2>စပင်ဘီး လှည့်ရန်</h2>
+          <p class="hint">ငွေလွှဲအော်ဒါတင် → Admin က ကံစမ်းခွင့် ထည့်ပေး → အော်ဒါနံပါတ်+ဖုန်း ထည့်ပြီး ကံစမ်းမည်</p>
+        </div>
+        <div class="spin-unlock" id="spinUnlockBox">
+          <div class="spin-unlock-row">
+            <div class="form-group">
+              <label for="spinOrderId">အော်ဒါနံပါတ်</label>
+              <input id="spinOrderId" autocomplete="off" placeholder="MMxxxxxxxx" />
+            </div>
+            <div class="form-group">
+              <label for="spinPhone">ဖုန်းနံပါတ်</label>
+              <input id="spinPhone" autocomplete="tel" placeholder="09xxxxxxxxx" />
+            </div>
+          </div>
+          <button type="button" class="btn btn-outline" id="spinUnlockBtn">ကံစမ်းခွင့် စစ်မည်</button>
+          <p class="hint" id="spinUnlockMsg"></p>
+        </div>
+        <div class="spin-stage">
+          <div class="spin-pointer" aria-hidden="true"></div>
+          <canvas id="spinCanvas" width="360" height="360" aria-label="စပင်ဘီး"></canvas>
+        </div>
+        <button type="button" class="btn btn-spin" id="spinBtn" disabled>ကံစမ်းမည် (0)</button>
+        <p class="hint spin-cooldown-hint" id="spinHint"></p>
+      </div>
+    </section>
     <section class="hero">
       <h1>စုဆောင်းပစ္စည်းများ</h1>
       <p>အိမ်အရောက်ပို့ — ဘဏ်လွှဲငွေဖြင့် အော်ဒါတင်ပါ</p>
@@ -38,6 +67,24 @@
       <div class="empty">ပစ္စည်းများ ဖတ်နေသည်…</div>
     </section>
   </main>
+
+
+  <!-- Spin result modal -->
+  <div class="overlay" id="spinResultOverlay" role="dialog" aria-modal="true">
+    <div class="panel spin-result-panel">
+      <div class="panel-header">
+        <h2>ဆုရလဒ်</h2>
+        <button type="button" class="close-x" data-close="spinResultOverlay" aria-label="ပိတ်ရန်">×</button>
+      </div>
+      <div class="spin-result-body">
+        <div class="spin-result-emoji" aria-hidden="true">🎉</div>
+        <p class="spin-result-label">သင်ရရှိသောဆု</p>
+        <div class="spin-result-name" id="spinResultName"></div>
+        <button type="button" class="btn btn-primary hidden" id="spinResultProductBtn" style="width:100%;margin-top:1rem">ပစ္စည်းကြည့်မည်</button>
+        <button type="button" class="btn btn-outline" data-close="spinResultOverlay" style="width:100%;margin-top:0.6rem">ပိတ်မည်</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Cart overlay -->
   <div class="overlay" id="cartOverlay" role="dialog" aria-modal="true">

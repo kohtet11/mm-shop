@@ -99,6 +99,7 @@ function createTables(database) {
       total_mmk INTEGER NOT NULL,
       status TEXT DEFAULT 'pending',
       slip_path TEXT NOT NULL,
+      spin_credits INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -122,6 +123,27 @@ function createTables(database) {
       token TEXT PRIMARY KEY,
       created_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS spin_prizes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      product_id INTEGER,
+      hit_every INTEGER NOT NULL DEFAULT 1,
+      active INTEGER DEFAULT 1,
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (product_id) REFERENCES products(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS spin_plays (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id TEXT NOT NULL,
+      prize_id INTEGER,
+      prize_name TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (order_id) REFERENCES orders(order_id),
+      FOREIGN KEY (prize_id) REFERENCES spin_prizes(id)
+    );
   `);
 }
 
@@ -133,6 +155,13 @@ function migrateProductsColumns(database) {
   }
   if (!cols.includes('discount_percent')) {
     database.exec('ALTER TABLE products ADD COLUMN discount_percent INTEGER DEFAULT 0');
+  }
+}
+
+function migrateOrdersSpinCredits(database) {
+  const cols = database.prepare('PRAGMA table_info(orders)').all().map((c) => c.name);
+  if (!cols.includes('spin_credits')) {
+    database.exec('ALTER TABLE orders ADD COLUMN spin_credits INTEGER DEFAULT 0');
   }
 }
 
@@ -498,6 +527,7 @@ function formatOrder(row, items) {
     total_mmk: row.total_mmk,
     status: row.status,
     slip_path: row.slip_path,
+    spin_credits: Number(row.spin_credits) || 0,
     created_at: row.created_at,
     updated_at: row.updated_at,
     items: items || [],
@@ -658,6 +688,161 @@ function trackOrderHandler(req, res) {
 
 app.get('/api/orders/track', trackOrderHandler);
 app.post('/api/orders/track', trackOrderHandler);
+
+
+// ========== PUBLIC SPIN WHEEL ==========
+
+function clampHitEvery(value) {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.min(1000000, n);
+}
+
+function pickWeightedSpinPrize(prizes) {
+  // weight = 1/hit_every, then normalize
+  const weights = prizes.map((p) => {
+    const n = Math.max(1, parseInt(p.hit_every, 10) || 1);
+    return 1 / n;
+  });
+  const total = weights.reduce((s, w) => s + w, 0);
+  if (total <= 0) return prizes[0];
+  let r = Math.random() * total;
+  for (let i = 0; i < prizes.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return prizes[i];
+  }
+  return prizes[prizes.length - 1];
+}
+
+function formatSpinPrizePublic(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    product_id: row.product_id || null,
+  };
+}
+
+function formatSpinPrizeAdmin(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    product_id: row.product_id || null,
+    hit_every: row.hit_every,
+    active: row.active,
+    sort_order: row.sort_order,
+    created_at: row.created_at,
+    product_name: row.product_name || null,
+  };
+}
+
+app.get('/api/spin/prizes', (_req, res) => {
+  try {
+    const prizes = db
+      .prepare(
+        `SELECT id, name, product_id
+         FROM spin_prizes
+         WHERE active = 1
+         ORDER BY sort_order ASC, id ASC`
+      )
+      .all();
+    res.json(prizes.map(formatSpinPrizePublic));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+function findOrderForSpin(orderId, phone) {
+  const oid = String(orderId || '').trim();
+  const ph = normalizePhone(phone);
+  if (!oid || !ph) return null;
+  const order = db.prepare('SELECT * FROM orders WHERE order_id = ?').get(oid);
+  if (!order || normalizePhone(order.phone) !== ph) return null;
+  return order;
+}
+
+app.post('/api/spin/unlock', (req, res) => {
+  try {
+    const orderId = (req.body && (req.body.orderId || req.body.order_id)) || '';
+    const phone = (req.body && req.body.phone) || '';
+    const order = findOrderForSpin(orderId, phone);
+    if (!order) {
+      return res.status(404).json({ error: 'အော်ဒါ မတွေ့ပါ — အော်ဒါနံပါတ်နှင့် ဖုန်း စစ်ပါ' });
+    }
+    const credits = Number(order.spin_credits) || 0;
+    res.json({
+      ok: true,
+      orderId: order.order_id,
+      spinCredits: credits,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/spin', (req, res) => {
+  try {
+    const orderId = (req.body && (req.body.orderId || req.body.order_id)) || '';
+    const phone = (req.body && req.body.phone) || '';
+    const order = findOrderForSpin(orderId, phone);
+    if (!order) {
+      return res.status(404).json({ error: 'အော်ဒါ မတွေ့ပါ — အော်ဒါနံပါတ်နှင့် ဖုန်း စစ်ပါ' });
+    }
+    const credits = Number(order.spin_credits) || 0;
+    if (credits < 1) {
+      return res.status(403).json({
+        error: 'ကံစမ်းခွင့် မရှိပါ — Admin က အခွင့်ထည့်ပေးမှ လှည့်နိုင်သည်',
+        spinCredits: 0,
+      });
+    }
+
+    const prizes = db
+      .prepare(
+        `SELECT id, name, product_id, hit_every
+         FROM spin_prizes
+         WHERE active = 1
+         ORDER BY sort_order ASC, id ASC`
+      )
+      .all();
+    if (!prizes.length) {
+      return res.status(400).json({ error: 'စပင်ဘီး ဆုများ မရှိသေးပါ' });
+    }
+
+    // Atomic consume 1 credit (re-check in UPDATE)
+    const upd = db
+      .prepare(
+        `UPDATE orders SET spin_credits = spin_credits - 1, updated_at = datetime('now')
+         WHERE order_id = ? AND spin_credits >= 1`
+      )
+      .run(order.order_id);
+    if (!upd.changes) {
+      return res.status(403).json({
+        error: 'ကံစမ်းခွင့် မရှိပါ',
+        spinCredits: 0,
+      });
+    }
+
+    const won = pickWeightedSpinPrize(prizes);
+    db.prepare(
+      `INSERT INTO spin_plays (order_id, prize_id, prize_name) VALUES (?, ?, ?)`
+    ).run(order.order_id, won.id, won.name);
+
+    const left = db
+      .prepare('SELECT spin_credits FROM orders WHERE order_id = ?')
+      .get(order.order_id);
+
+    res.json({
+      prizeId: won.id,
+      name: won.name,
+      productId: won.product_id || null,
+      spinCredits: Number(left && left.spin_credits) || 0,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 
 // ========== ADMIN AUTH ==========
 
@@ -830,7 +1015,13 @@ app.get('/api/admin/orders/:orderId', requireAdmin, (req, res) => {
   const items = db
     .prepare('SELECT * FROM order_items WHERE order_id = ?')
     .all(o.order_id);
-  res.json(formatOrder(o, items));
+  const plays = db
+    .prepare(
+      `SELECT id, prize_id, prize_name, created_at FROM spin_plays
+       WHERE order_id = ? ORDER BY id DESC LIMIT 20`
+    )
+    .all(o.order_id);
+  res.json({ ...formatOrder(o, items), spin_plays: plays });
 });
 
 app.patch('/api/admin/orders/:orderId/status', requireAdmin, (req, res) => {
@@ -849,6 +1040,35 @@ app.patch('/api/admin/orders/:orderId/status', requireAdmin, (req, res) => {
     .prepare('SELECT * FROM order_items WHERE order_id = ?')
     .all(updated.order_id);
   res.json(formatOrder(updated, items));
+});
+
+app.patch('/api/admin/orders/:orderId/spin-credits', requireAdmin, (req, res) => {
+  try {
+    const o = db.prepare('SELECT * FROM orders WHERE order_id = ?').get(req.params.orderId);
+    if (!o) return res.status(404).json({ error: 'Not found' });
+    let credits = parseInt(req.body && req.body.spin_credits, 10);
+    if (!Number.isFinite(credits) || credits < 0) {
+      return res.status(400).json({ error: 'spin_credits သည် 0 သို့မဟုတ် အပေါင်းကိန်း ဖြစ်ရမည်' });
+    }
+    credits = Math.min(1000, credits);
+    db.prepare(
+      `UPDATE orders SET spin_credits = ?, updated_at = datetime('now') WHERE order_id = ?`
+    ).run(credits, req.params.orderId);
+    const updated = db.prepare('SELECT * FROM orders WHERE order_id = ?').get(req.params.orderId);
+    const items = db
+      .prepare('SELECT * FROM order_items WHERE order_id = ?')
+      .all(updated.order_id);
+    const plays = db
+      .prepare(
+        `SELECT id, prize_id, prize_name, created_at FROM spin_plays
+         WHERE order_id = ? ORDER BY id DESC LIMIT 20`
+      )
+      .all(updated.order_id);
+    res.json({ ...formatOrder(updated, items), spin_plays: plays });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 
@@ -872,6 +1092,139 @@ app.delete('/api/admin/orders/:orderId', requireAdmin, (req, res) => {
     const deleted = deleteOrderById(db, req.params.orderId);
     if (!deleted) return res.status(404).json({ error: 'Not found' });
     res.json({ ok: true, order_id: deleted.order_id });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
+// ========== ADMIN SPIN PRIZES ==========
+
+app.get('/api/admin/spin-prizes', requireAdmin, (_req, res) => {
+  try {
+    const prizes = db
+      .prepare(
+        `SELECT sp.*, p.name AS product_name
+         FROM spin_prizes sp
+         LEFT JOIN products p ON p.id = sp.product_id
+         ORDER BY sp.sort_order ASC, sp.id ASC`
+      )
+      .all();
+    res.json(prizes.map(formatSpinPrizeAdmin));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/admin/spin-prizes', requireAdmin, (req, res) => {
+  try {
+    const { name, product_id, hit_every, active, sort_order } = req.body || {};
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: 'အမည် လိုအပ်သည်' });
+    }
+    let pid = null;
+    if (product_id !== undefined && product_id !== null && product_id !== '') {
+      pid = parseInt(product_id, 10);
+      if (!Number.isFinite(pid)) return res.status(400).json({ error: 'Invalid product_id' });
+      const prod = db.prepare('SELECT id FROM products WHERE id = ?').get(pid);
+      if (!prod) return res.status(400).json({ error: 'ပစ္စည်း မတွေ့ပါ' });
+    }
+    const hit = clampHitEvery(hit_every);
+    const isActive = active === '0' || active === 0 || active === false || active === 'false' ? 0 : 1;
+    const sort = parseInt(sort_order, 10);
+    const sortVal = Number.isFinite(sort) ? sort : 0;
+    const result = db
+      .prepare(
+        `INSERT INTO spin_prizes (name, product_id, hit_every, active, sort_order)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+      .run(String(name).trim(), pid, hit, isActive, sortVal);
+    const row = db
+      .prepare(
+        `SELECT sp.*, p.name AS product_name
+         FROM spin_prizes sp
+         LEFT JOIN products p ON p.id = sp.product_id
+         WHERE sp.id = ?`
+      )
+      .get(result.lastInsertRowid);
+    res.json(formatSpinPrizeAdmin(row));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.put('/api/admin/spin-prizes/:id', requireAdmin, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const existing = db.prepare('SELECT * FROM spin_prizes WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+
+    const { name, product_id, hit_every, active, sort_order } = req.body || {};
+    let pid = existing.product_id;
+    if (product_id !== undefined) {
+      if (product_id === null || product_id === '') {
+        pid = null;
+      } else {
+        pid = parseInt(product_id, 10);
+        if (!Number.isFinite(pid)) return res.status(400).json({ error: 'Invalid product_id' });
+        const prod = db.prepare('SELECT id FROM products WHERE id = ?').get(pid);
+        if (!prod) return res.status(400).json({ error: 'ပစ္စည်း မတွေ့ပါ' });
+      }
+    }
+
+    const isActive =
+      active === undefined
+        ? existing.active
+        : active === '0' || active === 0 || active === false || active === 'false'
+          ? 0
+          : 1;
+
+    const hit =
+      hit_every === undefined ? existing.hit_every : clampHitEvery(hit_every);
+    const sort =
+      sort_order === undefined
+        ? existing.sort_order
+        : Number.isFinite(parseInt(sort_order, 10))
+          ? parseInt(sort_order, 10)
+          : existing.sort_order;
+
+    db.prepare(
+      `UPDATE spin_prizes SET name = ?, product_id = ?, hit_every = ?, active = ?, sort_order = ?
+       WHERE id = ?`
+    ).run(
+      name !== undefined ? String(name).trim() : existing.name,
+      pid,
+      hit,
+      isActive,
+      sort,
+      id
+    );
+
+    const row = db
+      .prepare(
+        `SELECT sp.*, p.name AS product_name
+         FROM spin_prizes sp
+         LEFT JOIN products p ON p.id = sp.product_id
+         WHERE sp.id = ?`
+      )
+      .get(id);
+    res.json(formatSpinPrizeAdmin(row));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.delete('/api/admin/spin-prizes/:id', requireAdmin, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const existing = db.prepare('SELECT * FROM spin_prizes WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    db.prepare('DELETE FROM spin_prizes WHERE id = ?').run(id);
+    res.json({ ok: true });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Server error' });
@@ -1046,6 +1399,7 @@ async function start() {
 
   createTables(db);
   migrateProductsColumns(db);
+  migrateOrdersSpinCredits(db);
   seedIfEmpty(db);
   ensureDefaultSettings(db);
 

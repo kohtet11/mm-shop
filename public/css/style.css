@@ -689,3 +689,132 @@ a.cart-btn {
 .my-order-card.unavailable {
   opacity: 0.7;
 }
+
+/* ========== Spin wheel (Glow Gear neon) ========== */
+.spin-section {
+  margin: 1.25rem 0 0.5rem;
+}
+.spin-section[hidden] { display: none !important; }
+.spin-card {
+  background: linear-gradient(145deg, #1a0b2e 0%, #2e1065 45%, #0f172a 100%);
+  border: 1px solid rgba(168, 85, 247, 0.45);
+  border-radius: 20px;
+  box-shadow: 0 0 0 1px rgba(192, 132, 252, 0.15), 0 12px 40px rgba(88, 28, 135, 0.35);
+  padding: 1.25rem 1rem 1.5rem;
+  color: #f5f3ff;
+  text-align: center;
+}
+.spin-heading h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1.35rem;
+  color: #f3e8ff;
+  text-shadow: 0 0 18px rgba(192, 132, 252, 0.55);
+}
+.spin-heading .hint,
+.spin-card .hint {
+  color: #c4b5fd;
+}
+.spin-unlock {
+  max-width: 520px;
+  margin: 0.85rem auto 1rem;
+  text-align: left;
+}
+.spin-unlock-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+@media (max-width: 560px) {
+  .spin-unlock-row { grid-template-columns: 1fr; }
+}
+.spin-unlock .form-group label {
+  color: #ddd6fe;
+  font-size: 0.88rem;
+}
+.spin-unlock input {
+  width: 100%;
+  background: rgba(15, 10, 26, 0.65);
+  border: 1px solid rgba(167, 139, 250, 0.45);
+  color: #fff;
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+}
+.spin-unlock #spinUnlockBtn {
+  margin-top: 0.55rem;
+  border-color: rgba(192, 132, 252, 0.6);
+  color: #ede9fe;
+  background: rgba(91, 33, 182, 0.35);
+}
+.spin-unlock #spinUnlockMsg {
+  margin: 0.45rem 0 0;
+  min-height: 1.2em;
+}
+.spin-unlock #spinUnlockMsg.ok {
+  color: #86efac;
+  font-weight: 600;
+}
+.spin-stage {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 0.5rem auto 1rem;
+  max-width: 380px;
+}
+.spin-pointer {
+  position: absolute;
+  top: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 12px solid transparent;
+  border-right: 12px solid transparent;
+  border-top: 22px solid #f0abfc;
+  filter: drop-shadow(0 0 8px rgba(240, 171, 252, 0.9));
+  z-index: 2;
+}
+#spinCanvas {
+  display: block;
+  max-width: 100%;
+  border-radius: 50%;
+  box-shadow: 0 0 28px rgba(168, 85, 247, 0.55);
+}
+.btn-spin {
+  background: linear-gradient(135deg, #a855f7, #ec4899);
+  color: #fff;
+  font-size: 1.05rem;
+  padding: 0.75rem 1.6rem;
+  border: none;
+  box-shadow: 0 0 20px rgba(236, 72, 153, 0.45);
+  min-width: 200px;
+}
+.btn-spin.ready:not(:disabled) {
+  animation: spinPulse 1.6s ease-in-out infinite;
+}
+.btn-spin.dimmed,
+.btn-spin:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+  animation: none;
+  filter: grayscale(0.35);
+}
+@keyframes spinPulse {
+  0%, 100% { box-shadow: 0 0 16px rgba(168, 85, 247, 0.4); }
+  50% { box-shadow: 0 0 28px rgba(236, 72, 153, 0.75); }
+}
+.spin-result-panel {
+  max-width: 420px;
+  text-align: center;
+}
+.spin-result-emoji { font-size: 2.5rem; }
+.spin-result-label { color: var(--muted); margin: 0.25rem 0; }
+.spin-result-name {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #7c3aed;
+  word-break: break-word;
+}
