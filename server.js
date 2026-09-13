@@ -86,6 +86,7 @@ function createTables(database) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       price_mmk INTEGER NOT NULL,
+      cost_mmk INTEGER DEFAULT 0,
       description TEXT DEFAULT '',
       image_path TEXT DEFAULT '',
       active INTEGER DEFAULT 1,
@@ -123,6 +124,7 @@ function createTables(database) {
       product_id INTEGER,
       product_name TEXT NOT NULL,
       unit_price_mmk INTEGER NOT NULL,
+      cost_mmk INTEGER DEFAULT 0,
       quantity INTEGER NOT NULL,
       FOREIGN KEY (order_id) REFERENCES orders(order_id)
     );
@@ -143,6 +145,7 @@ function createTables(database) {
       product_id INTEGER,
       hit_every INTEGER NOT NULL DEFAULT 1,
       is_special INTEGER DEFAULT 0,
+      cost_mmk INTEGER DEFAULT 0,
       active INTEGER DEFAULT 1,
       sort_order INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
@@ -222,6 +225,9 @@ function migrateProductsColumns(database) {
   }
   if (!cols.includes('authenticity')) {
     database.exec("ALTER TABLE products ADD COLUMN authenticity TEXT DEFAULT 'authentic'");
+  }
+  if (!cols.includes('cost_mmk')) {
+    database.exec('ALTER TABLE products ADD COLUMN cost_mmk INTEGER DEFAULT 0');
   }
   // is_spin_credit items default to spin_game; leave explicit categories intact
   database.exec(
@@ -411,6 +417,33 @@ function migrateSpinPrizesSpecial(database) {
   if (!cols.includes('is_special')) {
     database.exec('ALTER TABLE spin_prizes ADD COLUMN is_special INTEGER DEFAULT 0');
   }
+  if (!cols.includes('cost_mmk')) {
+    database.exec('ALTER TABLE spin_prizes ADD COLUMN cost_mmk INTEGER DEFAULT 0');
+  }
+}
+
+function migrateOrderItemsCost(database) {
+  const cols = database.prepare('PRAGMA table_info(order_items)').all().map((c) => c.name);
+  if (!cols.length) return;
+  if (!cols.includes('cost_mmk')) {
+    database.exec('ALTER TABLE order_items ADD COLUMN cost_mmk INTEGER DEFAULT 0');
+  }
+}
+
+function parseCostMmk(value, fallback = 0) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.min(100000000, n);
+}
+
+/** Effective prize cost: linked product.cost_mmk, else spin_prizes.cost_mmk. */
+function resolvePrizeCostMmk(prizeRow, productRow) {
+  if (prizeRow && prizeRow.product_id && productRow) {
+    return Number(productRow.cost_mmk) || 0;
+  }
+  if (prizeRow) return Number(prizeRow.cost_mmk) || 0;
+  return 0;
 }
 
 const SPIN_CYCLE_SIZE = 15;
@@ -1180,7 +1213,7 @@ app.post('/api/orders', (req, res) => {
           for (const [pid, qty] of qtyByProduct.entries()) {
             const product = db
               .prepare(
-                'SELECT id, name, price_mmk, active, stock, is_spin_credit FROM products WHERE id = ?'
+                'SELECT id, name, price_mmk, cost_mmk, active, stock, is_spin_credit FROM products WHERE id = ?'
               )
               .get(pid);
             if (!product) {
@@ -1219,6 +1252,7 @@ app.post('/api/orders', (req, res) => {
               product_id: product.id,
               product_name: product.name,
               unit_price_mmk: product.price_mmk,
+              cost_mmk: Number(product.cost_mmk) || 0,
               quantity: qty,
             });
           }
@@ -1236,11 +1270,18 @@ app.post('/api/orders', (req, res) => {
           ).run(orderId, nameVal, phoneVal, addressVal, notesVal, total, slipPath);
 
           const itemIns = db.prepare(
-            `INSERT INTO order_items (order_id, product_id, product_name, unit_price_mmk, quantity)
-             VALUES (?, ?, ?, ?, ?)`
+            `INSERT INTO order_items (order_id, product_id, product_name, unit_price_mmk, cost_mmk, quantity)
+             VALUES (?, ?, ?, ?, ?, ?)`
           );
           for (const li of lineItems) {
-            itemIns.run(orderId, li.product_id, li.product_name, li.unit_price_mmk, li.quantity);
+            itemIns.run(
+              orderId,
+              li.product_id,
+              li.product_name,
+              li.unit_price_mmk,
+              Number(li.cost_mmk) || 0,
+              li.quantity
+            );
           }
           return { orderId, total };
         })();
@@ -1520,12 +1561,22 @@ function formatSpinPrizePublic(row) {
 }
 
 function formatSpinPrizeAdmin(row) {
+  const prizeCost = Number(row.cost_mmk) || 0;
+  const productCost =
+    row.product_id != null && row.product_cost_mmk != null
+      ? Number(row.product_cost_mmk) || 0
+      : null;
+  const effective =
+    row.product_id != null && productCost != null ? productCost : prizeCost;
   return {
     id: row.id,
     name: row.name,
     product_id: row.product_id || null,
     hit_every: row.hit_every,
     is_special: Number(row.is_special) ? 1 : 0,
+    cost_mmk: prizeCost,
+    effective_cost_mmk: effective,
+    product_cost_mmk: productCost,
     active: row.active,
     sort_order: row.sort_order,
     created_at: row.created_at,
@@ -1585,7 +1636,7 @@ app.post('/api/spin/purchase', (req, res) => {
         const created = db.transaction(() => {
           const fresh = db
             .prepare(
-              'SELECT id, name, price_mmk, active, stock, is_spin_credit FROM products WHERE id = ?'
+              'SELECT id, name, price_mmk, cost_mmk, active, stock, is_spin_credit FROM products WHERE id = ?'
             )
             .get(product.id);
           if (!fresh || !Number(fresh.is_spin_credit)) {
@@ -1616,9 +1667,16 @@ app.post('/api/spin/purchase', (req, res) => {
              VALUES (?, ?, ?, ?, '', ?, 'pending', ?)`
           ).run(orderId, nameVal, phoneVal, addressVal, total, slipPath);
           db.prepare(
-            `INSERT INTO order_items (order_id, product_id, product_name, unit_price_mmk, quantity)
-             VALUES (?, ?, ?, ?, ?)`
-          ).run(orderId, fresh.id, fresh.name, fresh.price_mmk, qty);
+            `INSERT INTO order_items (order_id, product_id, product_name, unit_price_mmk, cost_mmk, quantity)
+             VALUES (?, ?, ?, ?, ?, ?)`
+          ).run(
+            orderId,
+            fresh.id,
+            fresh.name,
+            fresh.price_mmk,
+            Number(fresh.cost_mmk) || 0,
+            qty
+          );
           return { orderId, total_mmk: total, quantity: qty };
         })();
         res.json({
@@ -1989,7 +2047,7 @@ app.delete('/api/admin/categories/:id', requireAdmin, (req, res) => {
 app.get('/api/admin/products', requireAdmin, (_req, res) => {
   const products = db
     .prepare(
-      `SELECT id, name, price_mmk, description, image_path, active, on_banner, discount_percent, stock, is_spin_credit, category, authenticity, created_at, updated_at
+      `SELECT id, name, price_mmk, cost_mmk, description, image_path, active, on_banner, discount_percent, stock, is_spin_credit, category, authenticity, created_at, updated_at
        FROM products ORDER BY id DESC`
     )
     .all();
@@ -2000,7 +2058,7 @@ app.post('/api/admin/products', requireAdmin, (req, res) => {
   uploadProduct.single('image')(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message });
     try {
-      const { name, price_mmk, description, active, on_banner, discount_percent, stock, is_spin_credit, category, authenticity } = req.body;
+      const { name, price_mmk, cost_mmk, description, active, on_banner, discount_percent, stock, is_spin_credit, category, authenticity } = req.body;
       if (!name || price_mmk === undefined) {
         return res.status(400).json({ error: 'name and price required' });
       }
@@ -2012,14 +2070,16 @@ app.post('/api/admin/products', requireAdmin, (req, res) => {
       const spinCredit = parseBoolFlag(is_spin_credit, 0);
       const cat = categoryForProduct(category, spinCredit);
       const auth = normalizeAuthenticity(authenticity, 'authentic');
+      const costVal = parseCostMmk(cost_mmk, 0);
       const result = db
         .prepare(
-          `INSERT INTO products (name, price_mmk, description, image_path, active, on_banner, discount_percent, stock, is_spin_credit, category, authenticity)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO products (name, price_mmk, cost_mmk, description, image_path, active, on_banner, discount_percent, stock, is_spin_credit, category, authenticity)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           String(name).trim(),
           parseInt(price_mmk, 10) || 0,
+          costVal,
           description ? String(description) : '',
           image_path,
           isActive,
@@ -2047,7 +2107,7 @@ app.put('/api/admin/products/:id', requireAdmin, (req, res) => {
       const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
       if (!existing) return res.status(404).json({ error: 'Not found' });
 
-      const { name, price_mmk, description, active, on_banner, discount_percent, stock, is_spin_credit, category, authenticity } = req.body;
+      const { name, price_mmk, cost_mmk, description, active, on_banner, discount_percent, stock, is_spin_credit, category, authenticity } = req.body;
       let image_path = existing.image_path;
       if (req.file) {
         image_path = `products/${req.file.filename}`;
@@ -2081,13 +2141,18 @@ app.put('/api/admin/products/:id', requireAdmin, (req, res) => {
         authenticity === undefined
           ? normalizeAuthenticity(existing.authenticity, 'authentic')
           : normalizeAuthenticity(authenticity, 'authentic');
+      const costVal =
+        cost_mmk === undefined || cost_mmk === null || cost_mmk === ''
+          ? Number(existing.cost_mmk) || 0
+          : parseCostMmk(cost_mmk, 0);
 
       db.prepare(
-        `UPDATE products SET name = ?, price_mmk = ?, description = ?, image_path = ?,
+        `UPDATE products SET name = ?, price_mmk = ?, cost_mmk = ?, description = ?, image_path = ?,
          active = ?, on_banner = ?, discount_percent = ?, stock = ?, is_spin_credit = ?, category = ?, authenticity = ?, updated_at = datetime('now') WHERE id = ?`
       ).run(
         name !== undefined ? String(name).trim() : existing.name,
         price_mmk !== undefined ? parseInt(price_mmk, 10) || 0 : existing.price_mmk,
+        costVal,
         description !== undefined ? String(description) : existing.description,
         image_path,
         isActive,
@@ -2213,6 +2278,19 @@ function itemsSummary(items) {
     .join(', ');
 }
 
+function orderItemsCostProfit(items) {
+  let cost_total_mmk = 0;
+  let profit_mmk = 0;
+  for (const it of items || []) {
+    const qty = Number(it.quantity) || 0;
+    const sell = Number(it.unit_price_mmk) || 0;
+    const cost = Number(it.cost_mmk) || 0;
+    cost_total_mmk += cost * qty;
+    profit_mmk += (sell - cost) * qty;
+  }
+  return { cost_total_mmk, profit_mmk };
+}
+
 function querySalesReportRows(database, periodInfo) {
   const where = periodInfo.whereSql.replace(/COL/g, 'o.created_at');
   const orders = database
@@ -2226,6 +2304,7 @@ function querySalesReportRows(database, periodInfo) {
     const items = database
       .prepare('SELECT * FROM order_items WHERE order_id = ?')
       .all(o.order_id);
+    const { cost_total_mmk, profit_mmk } = orderItemsCostProfit(items);
     return {
       order_id: o.order_id,
       created_at: o.created_at,
@@ -2234,6 +2313,8 @@ function querySalesReportRows(database, periodInfo) {
       address: o.address || '',
       items_summary: itemsSummary(items),
       total_mmk: Number(o.total_mmk) || 0,
+      cost_total_mmk,
+      profit_mmk,
       status: o.status || '',
       status_label: REPORT_STATUS_LABEL[o.status] || o.status || '',
       spin_credits: Number(o.spin_credits) || 0,
@@ -2246,6 +2327,14 @@ function querySalesReportRows(database, periodInfo) {
 
 function sumSalesPeriodTotalMmk(rows) {
   return rows.reduce((sum, r) => sum + (Number(r.total_mmk) || 0), 0);
+}
+
+function sumSalesPeriodCostMmk(rows) {
+  return rows.reduce((sum, r) => sum + (Number(r.cost_total_mmk) || 0), 0);
+}
+
+function sumSalesPeriodProfitMmk(rows) {
+  return rows.reduce((sum, r) => sum + (Number(r.profit_mmk) || 0), 0);
 }
 
 function sumUniqueSpinOrderTotals(rows) {
@@ -2278,7 +2367,9 @@ function querySpinReportRows(database, periodInfo) {
          o.spin_credits,
          o.total_mmk AS order_total_mmk,
          COALESCE(spr.product_id, NULL) AS product_id,
-         p.name AS product_name
+         p.name AS product_name,
+         COALESCE(spr.cost_mmk, 0) AS prize_own_cost_mmk,
+         COALESCE(p.cost_mmk, 0) AS product_cost_mmk
        FROM spin_plays sp
        LEFT JOIN orders o ON o.order_id = sp.order_id
        LEFT JOIN spin_prizes spr ON spr.id = sp.prize_id
@@ -2287,18 +2378,29 @@ function querySpinReportRows(database, periodInfo) {
        ORDER BY datetime(sp.created_at) DESC, sp.id DESC`
     )
     .all(periodInfo.date);
-  return rows.map((r) => ({
-    id: r.id,
-    created_at: r.created_at,
-    order_id: r.order_id || '',
-    prize_name: r.prize_name || '',
-    product_name: r.product_name || '',
-    customer_name: r.customer_name || '',
-    phone: r.phone || '',
-    address: r.address || '',
-    spin_credits: Number(r.spin_credits) || 0,
-    order_total_mmk: Number(r.order_total_mmk) || 0,
-  }));
+  return rows.map((r) => {
+    const prize_cost_mmk =
+      r.product_id != null
+        ? Number(r.product_cost_mmk) || 0
+        : Number(r.prize_own_cost_mmk) || 0;
+    return {
+      id: r.id,
+      created_at: r.created_at,
+      order_id: r.order_id || '',
+      prize_name: r.prize_name || '',
+      product_name: r.product_name || '',
+      prize_cost_mmk,
+      customer_name: r.customer_name || '',
+      phone: r.phone || '',
+      address: r.address || '',
+      spin_credits: Number(r.spin_credits) || 0,
+      order_total_mmk: Number(r.order_total_mmk) || 0,
+    };
+  });
+}
+
+function sumSpinPrizeCosts(rows) {
+  return rows.reduce((sum, r) => sum + (Number(r.prize_cost_mmk) || 0), 0);
 }
 
 function reportFilename(kind, periodInfo) {
@@ -2317,6 +2419,8 @@ async function buildSalesWorkbook(rows, periodInfo) {
     { header: 'Address', key: 'address', width: 28 },
     { header: 'Items', key: 'items_summary', width: 36 },
     { header: 'Total MMK', key: 'total_mmk', width: 14 },
+    { header: 'Cost MMK', key: 'cost_total_mmk', width: 14 },
+    { header: 'အမြတ်', key: 'profit_mmk', width: 14 },
     { header: 'Status', key: 'status_label', width: 14 },
     { header: 'Spin credits', key: 'spin_credits', width: 12 },
     { header: 'Spin completed', key: 'spin_completed', width: 14 },
@@ -2325,9 +2429,13 @@ async function buildSalesWorkbook(rows, periodInfo) {
   ws.getRow(1).font = { bold: true };
   for (const r of rows) ws.addRow(r);
   const periodTotal = sumSalesPeriodTotalMmk(rows);
+  const periodCost = sumSalesPeriodCostMmk(rows);
+  const periodProfit = sumSalesPeriodProfitMmk(rows);
   const totalRow = ws.addRow({
     order_id: 'စုစုပေါင်း',
     total_mmk: periodTotal,
+    cost_total_mmk: periodCost,
+    profit_mmk: periodProfit,
   });
   totalRow.font = { bold: true };
   ws.addRow([]);
@@ -2335,6 +2443,8 @@ async function buildSalesWorkbook(rows, periodInfo) {
     order_id: 'ကာလ စုစုပေါင်း',
     created_at: `${periodInfo.periodLabel} / ${periodInfo.date} (Asia/Yangon)`,
     total_mmk: periodTotal,
+    cost_total_mmk: periodCost,
+    profit_mmk: periodProfit,
   });
   summaryRow.font = { bold: true };
   return wb;
@@ -2349,6 +2459,7 @@ async function buildSpinWorkbook(rows, periodInfo) {
     { header: 'Order ID', key: 'order_id', width: 18 },
     { header: 'Prize', key: 'prize_name', width: 22 },
     { header: 'Product', key: 'product_name', width: 22 },
+    { header: 'Prize cost MMK', key: 'prize_cost_mmk', width: 14 },
     { header: 'Customer', key: 'customer_name', width: 18 },
     { header: 'Phone', key: 'phone', width: 14 },
     { header: 'Address', key: 'address', width: 28 },
@@ -2358,13 +2469,23 @@ async function buildSpinWorkbook(rows, periodInfo) {
   ws.getRow(1).font = { bold: true };
   for (const r of rows) ws.addRow(r);
   const uniq = sumUniqueSpinOrderTotals(rows);
+  const prizeCosts = sumSpinPrizeCosts(rows);
+  const approxProfit = uniq.period_order_total_mmk - prizeCosts;
   ws.addRow([]);
   const summaryRow = ws.addRow({
     created_at: 'ကာလ Order စုစုပေါင်း (unique)',
     order_id: `${periodInfo.periodLabel} / ${periodInfo.date} (Asia/Yangon)`,
+    prize_cost_mmk: prizeCosts,
     order_total_mmk: uniq.period_order_total_mmk,
   });
   summaryRow.font = { bold: true };
+  const profitRow = ws.addRow({
+    created_at: 'အမြတ် ≈ (spin order revenue − prize costs)',
+    order_id: 'approximate',
+    prize_cost_mmk: prizeCosts,
+    order_total_mmk: approxProfit,
+  });
+  profitRow.font = { bold: true };
   return wb;
 }
 
@@ -2617,6 +2738,8 @@ app.get('/api/admin/reports/sales', requireAdmin, (req, res) => {
     if (info.error) return res.status(400).json({ error: info.error });
     const rows = querySalesReportRows(db, info);
     const period_total_mmk = sumSalesPeriodTotalMmk(rows);
+    const period_cost_mmk = sumSalesPeriodCostMmk(rows);
+    const period_profit_mmk = sumSalesPeriodProfitMmk(rows);
     res.json({
       type: 'sales',
       period: info.period,
@@ -2624,6 +2747,8 @@ app.get('/api/admin/reports/sales', requireAdmin, (req, res) => {
       timezone: 'Asia/Yangon',
       count: rows.length,
       period_total_mmk,
+      period_cost_mmk,
+      period_profit_mmk,
       rows,
     });
   } catch (e) {
@@ -2638,6 +2763,9 @@ app.get('/api/admin/reports/spin', requireAdmin, (req, res) => {
     if (info.error) return res.status(400).json({ error: info.error });
     const rows = querySpinReportRows(db, info);
     const uniq = sumUniqueSpinOrderTotals(rows);
+    const period_prize_cost_mmk = sumSpinPrizeCosts(rows);
+    const period_approx_profit_mmk =
+      uniq.period_order_total_mmk - period_prize_cost_mmk;
     res.json({
       type: 'spin',
       period: info.period,
@@ -2646,6 +2774,9 @@ app.get('/api/admin/reports/spin', requireAdmin, (req, res) => {
       count: rows.length,
       unique_orders: uniq.unique_orders,
       period_order_total_mmk: uniq.period_order_total_mmk,
+      period_prize_cost_mmk,
+      period_approx_profit_mmk,
+      note: 'အမြတ် ≈ unique spin-order revenue − prize costs (approximate)',
       rows,
     });
   } catch (e) {
@@ -2707,10 +2838,15 @@ app.get('/api/admin/reports/print', requireAdmin, (req, res) => {
     if (type === 'sales') {
       const rows = querySalesReportRows(db, info);
       const periodTotal = sumSalesPeriodTotalMmk(rows);
+      const periodCost = sumSalesPeriodCostMmk(rows);
+      const periodProfit = sumSalesPeriodProfitMmk(rows);
       html = renderReportPrintHtml({
         title: 'Glow Gear — ရောင်းရင်း စာရင်း',
         subtitle: subtitle + ` — စုစုပေါင်း ${rows.length} ခု`,
-        summaryLine: `ကာလ စုစုပေါင်း: ${periodTotal.toLocaleString('en-US')} MMK`,
+        summaryLine:
+          `ကာလ စုစုပေါင်း: ${periodTotal.toLocaleString('en-US')} MMK` +
+          ` · ဈေးရင်း: ${periodCost.toLocaleString('en-US')} MMK` +
+          ` · အမြတ်: ${periodProfit.toLocaleString('en-US')} MMK`,
         headers: [
           'Order ID',
           'အချိန်',
@@ -2719,6 +2855,8 @@ app.get('/api/admin/reports/print', requireAdmin, (req, res) => {
           'လိပ်စာ',
           'ပစ္စည်းများ',
           'စုစုပေါင်း',
+          'ဈေးရင်း',
+          'အမြတ်',
           'အခြေအနေ',
           'Spin credits',
           'Spin ပြီး',
@@ -2732,6 +2870,8 @@ app.get('/api/admin/reports/print', requireAdmin, (req, res) => {
           r.address,
           r.items_summary,
           r.total_mmk,
+          r.cost_total_mmk,
+          r.profit_mmk,
           r.status_label,
           r.spin_credits,
           r.spin_completed ? 'ဟုတ်' : 'မဟုတ်',
@@ -2741,15 +2881,21 @@ app.get('/api/admin/reports/print', requireAdmin, (req, res) => {
     } else {
       const rows = querySpinReportRows(db, info);
       const uniq = sumUniqueSpinOrderTotals(rows);
+      const prizeCosts = sumSpinPrizeCosts(rows);
+      const approxProfit = uniq.period_order_total_mmk - prizeCosts;
       html = renderReportPrintHtml({
         title: 'Glow Gear — Spin စာရင်း',
         subtitle: subtitle + ` — စုစုပေါင်း ${rows.length} ခု`,
-        summaryLine: `ကာလ Order စုစုပေါင်း (unique ${uniq.unique_orders}): ${uniq.period_order_total_mmk.toLocaleString('en-US')} MMK`,
+        summaryLine:
+          `ကာလ Order စုစုပေါင်း (unique ${uniq.unique_orders}): ${uniq.period_order_total_mmk.toLocaleString('en-US')} MMK` +
+          ` · ဆုဈေးရင်း: ${prizeCosts.toLocaleString('en-US')} MMK` +
+          ` · အမြတ် ≈ ${approxProfit.toLocaleString('en-US')} MMK`,
         headers: [
           'အချိန်',
           'Order ID',
           'ဆုအမည်',
           'ပစ္စည်း',
+          'ဆုဈေးရင်း',
           'အမည်',
           'ဖုန်း',
           'လိပ်စာ',
@@ -2761,6 +2907,7 @@ app.get('/api/admin/reports/print', requireAdmin, (req, res) => {
           r.order_id,
           r.prize_name,
           r.product_name,
+          r.prize_cost_mmk,
           r.customer_name,
           r.phone,
           r.address,
@@ -2876,7 +3023,7 @@ app.get('/api/admin/spin-prizes', requireAdmin, (_req, res) => {
   try {
     const prizes = db
       .prepare(
-        `SELECT sp.*, p.name AS product_name
+        `SELECT sp.*, p.name AS product_name, p.cost_mmk AS product_cost_mmk
          FROM spin_prizes sp
          LEFT JOIN products p ON p.id = sp.product_id
          ORDER BY sp.sort_order ASC, sp.id ASC`
@@ -2896,7 +3043,7 @@ app.get('/api/admin/spin-prizes', requireAdmin, (_req, res) => {
 
 app.post('/api/admin/spin-prizes', requireAdmin, (req, res) => {
   try {
-    const { name, product_id, hit_every, active, sort_order, is_special } = req.body || {};
+    const { name, product_id, hit_every, active, sort_order, is_special, cost_mmk } = req.body || {};
     if (!name || !String(name).trim()) {
       return res.status(400).json({ error: 'အမည် လိုအပ်သည်' });
     }
@@ -2918,15 +3065,16 @@ app.post('/api/admin/spin-prizes', requireAdmin, (req, res) => {
     const isSpecial = parseIsSpecial(is_special, 0);
     const sort = parseInt(sort_order, 10);
     const sortVal = Number.isFinite(sort) ? sort : 0;
+    const costVal = parseCostMmk(cost_mmk, 0);
     const result = db
       .prepare(
-        `INSERT INTO spin_prizes (name, product_id, hit_every, is_special, active, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO spin_prizes (name, product_id, hit_every, is_special, cost_mmk, active, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(String(name).trim(), pid, hit, isSpecial, isActive, sortVal);
+      .run(String(name).trim(), pid, hit, isSpecial, costVal, isActive, sortVal);
     const row = db
       .prepare(
-        `SELECT sp.*, p.name AS product_name
+        `SELECT sp.*, p.name AS product_name, p.cost_mmk AS product_cost_mmk
          FROM spin_prizes sp
          LEFT JOIN products p ON p.id = sp.product_id
          WHERE sp.id = ?`
@@ -2945,7 +3093,7 @@ app.put('/api/admin/spin-prizes/:id', requireAdmin, (req, res) => {
     const existing = db.prepare('SELECT * FROM spin_prizes WHERE id = ?').get(id);
     if (!existing) return res.status(404).json({ error: 'Not found' });
 
-    const { name, product_id, hit_every, active, sort_order, is_special } = req.body || {};
+    const { name, product_id, hit_every, active, sort_order, is_special, cost_mmk } = req.body || {};
     let pid = existing.product_id;
     if (product_id !== undefined) {
       if (product_id === null || product_id === '') {
@@ -2985,14 +3133,20 @@ app.put('/api/admin/spin-prizes/:id', requireAdmin, (req, res) => {
           ? parseInt(sort_order, 10)
           : existing.sort_order;
 
+    const costVal =
+      cost_mmk === undefined || cost_mmk === null || cost_mmk === ''
+        ? Number(existing.cost_mmk) || 0
+        : parseCostMmk(cost_mmk, 0);
+
     db.prepare(
-      `UPDATE spin_prizes SET name = ?, product_id = ?, hit_every = ?, is_special = ?, active = ?, sort_order = ?
+      `UPDATE spin_prizes SET name = ?, product_id = ?, hit_every = ?, is_special = ?, cost_mmk = ?, active = ?, sort_order = ?
        WHERE id = ?`
     ).run(
       name !== undefined ? String(name).trim() : existing.name,
       pid,
       hit,
       isSpecial,
+      costVal,
       isActive,
       sort,
       id
@@ -3000,7 +3154,7 @@ app.put('/api/admin/spin-prizes/:id', requireAdmin, (req, res) => {
 
     const row = db
       .prepare(
-        `SELECT sp.*, p.name AS product_name
+        `SELECT sp.*, p.name AS product_name, p.cost_mmk AS product_cost_mmk
          FROM spin_prizes sp
          LEFT JOIN products p ON p.id = sp.product_id
          WHERE sp.id = ?`
@@ -3426,6 +3580,7 @@ async function start() {
   migrateOrdersSpinCredits(db);
   migrateSpinPlaysColumns(db);
   migrateSpinPrizesSpecial(db);
+  migrateOrderItemsCost(db);
   migrateOrdersSpinCreditsLockBackfill(db);
   seedCategories(db);
   seedBuiltins(db);

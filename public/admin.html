@@ -57,6 +57,7 @@
                 <th>အမည်</th>
                 <th>အမျိုးအစား</th>
                 <th>ဈေး</th>
+                <th>ဈေးရင်း</th>
                 <th>စတော့</th>
                 <th>Banner / %</th>
                 <th>အခြေအနေ</th>
@@ -114,6 +115,7 @@
               <tr>
                 <th>အမည်</th>
                 <th>ပစ္စည်း</th>
+                <th>ဈေးရင်း</th>
                 <th>Special</th>
                 <th>အစဉ်</th>
                 <th>အခြေအနေ</th>
@@ -359,9 +361,16 @@
           <label for="pName">အမည် *</label>
           <input id="pName" required />
         </div>
-        <div class="form-group">
-          <label for="pPrice">ဈေးနှုန်း (ကျပ်) *</label>
-          <input id="pPrice" type="number" min="0" step="1" required />
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="pPrice">ရောင်းဈေး (ကျပ်) *</label>
+            <input id="pPrice" type="number" min="0" step="1" required />
+          </div>
+          <div class="form-group">
+            <label for="pCost">ဈေးရင်း (MMK)</label>
+            <input id="pCost" type="number" min="0" step="1" value="0" />
+            <div class="hint">အမြတ် = ရောင်းဈေး − ဈေးရင်း</div>
+          </div>
         </div>
         <div class="form-group">
           <label for="pCategory">အမျိုးအစား</label>
@@ -483,6 +492,11 @@
           <select id="spinProduct">
             <option value="">— မချိတ် —</option>
           </select>
+        </div>
+        <div class="form-group" id="spinCostGroup">
+          <label for="spinCost">ဈေးရင်း (MMK)</label>
+          <input id="spinCost" type="number" min="0" step="1" value="0" />
+          <div class="hint" id="spinCostHint">ပစ္စည်းချိတ်ပါက ထိုပစ္စည်း၏ ဈေးရင်းကို သုံးမည် — မချိတ်မှသာ ဤတန်ဖိုး</div>
         </div>
         <div class="form-group">
           <label for="spinSort">အစဉ် (sort order)</label>

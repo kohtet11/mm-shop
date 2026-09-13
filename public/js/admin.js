@@ -716,6 +716,7 @@
         </td>
         <td><span class="hint">${escapeHtml(catLabel)}</span></td>
         <td>${formatMMK(p.price_mmk)}</td>
+        <td>${formatMMK(Number(p.cost_mmk) || 0)}</td>
         <td>
           <div class="stock-adjust">
             <button type="button" class="btn btn-sm btn-outline" data-stock-delta="${p.id}" data-delta="-1" title="လျှော့">−</button>
@@ -732,7 +733,7 @@
       </tr>`;
         }
       )
-      .join('') || '<tr><td colspan="8" class="empty">ပစ္စည်း မရှိသေးပါ</td></tr>';
+      .join('') || '<tr><td colspan="9" class="empty">ပစ္စည်း မရှိသေးပါ</td></tr>';
 
     loadProducts._cache = products;
   }
@@ -856,6 +857,7 @@
     $('#productId').value = product ? product.id : '';
     $('#pName').value = product ? product.name : '';
     $('#pPrice').value = product ? product.price_mmk : '';
+    if ($('#pCost')) $('#pCost').value = product ? String(Number(product.cost_mmk) || 0) : '0';
     $('#pStock').value = product
       ? String(Number.isFinite(Number(product.stock)) ? Number(product.stock) : 0)
       : '99';
@@ -1037,6 +1039,7 @@
     const fd = new FormData();
     fd.append('name', $('#pName').value.trim());
     fd.append('price_mmk', $('#pPrice').value);
+    fd.append('cost_mmk', $('#pCost') ? $('#pCost').value : '0');
     fd.append('stock', $('#pStock') ? $('#pStock').value : '99');
     const catVal = $('#pCategory') ? $('#pCategory').value : 'blind_box';
     const isBlindBox = catVal === 'blind_box';
@@ -1823,10 +1826,14 @@
           const specialBadge = `<span class="badge spin-special${
             specialOn ? ' is-on' : ''
           }" role="button" tabindex="0" title="နှိပ်၍ special ဖွင့်/ပိတ်" data-toggle-special="${s.id}">၁၅ကြိမ်တွင် ၁ကြိမ်</span>`;
+          const costShow = formatMMK(
+            Number(s.effective_cost_mmk != null ? s.effective_cost_mmk : s.cost_mmk) || 0
+          );
           return `
       <tr>
         <td><strong>${escapeHtml(s.name)}</strong></td>
         <td>${prod}</td>
+        <td>${costShow}</td>
         <td>${specialBadge}</td>
         <td>${Number(s.sort_order) || 0}</td>
         <td>${s.active ? '<span class="badge paid_confirmed">active</span>' : '<span class="badge cancelled">inactive</span>'}</td>
@@ -1837,7 +1844,7 @@
       </tr>`;
         })
         .join('') ||
-      '<tr><td colspan="6" class="empty">ဆု မရှိသေးပါ — စတိုးတွင် စပင်ဘီး ပုန်းနေမည်</td></tr>';
+      '<tr><td colspan="7" class="empty">ဆု မရှိသေးပါ — စတိုးတွင် စပင်ဘီး ပုန်းနေမည်</td></tr>';
     return prizes;
   }
 
@@ -1921,6 +1928,27 @@
         .join('');
   }
 
+  function syncSpinCostHint() {
+    const hint = $('#spinCostHint');
+    const costEl = $('#spinCost');
+    const pid = $('#spinProduct') ? $('#spinProduct').value : '';
+    if (!hint || !costEl) return;
+    if (pid) {
+      const products = loadProducts._cache || [];
+      const p = products.find((x) => Number(x.id) === Number(pid));
+      const pc = p ? Number(p.cost_mmk) || 0 : 0;
+      hint.textContent =
+        'ပစ္စည်းချိတ်ထားသည် — report တွင် ပစ္စည်း ဈေးရင်း ' +
+        formatMMK(pc) +
+        ' ကို သုံးမည် (အောက်က field သည် name-only အတွက်)';
+      costEl.disabled = true;
+    } else {
+      hint.textContent =
+        'ပစ္စည်းမချိတ် — ဤဈေးရင်းကို prize cost အဖြစ် သုံးမည်';
+      costEl.disabled = false;
+    }
+  }
+
   async function openSpinModal(prize) {
     $('#spinModalTitle').textContent = prize ? 'ဆု ပြင်ဆင်ရန်' : 'ဆု အသစ်';
     $('#spinId').value = prize ? prize.id : '';
@@ -1929,11 +1957,18 @@
     $('#spinActive').checked = prize ? !!prize.active : true;
     const specialEl = $('#spinSpecial');
     if (specialEl) specialEl.checked = prize ? !!Number(prize.is_special) : false;
+    if ($('#spinCost')) {
+      $('#spinCost').value = prize ? String(Number(prize.cost_mmk) || 0) : '0';
+    }
     await fillSpinProductOptions(prize ? prize.product_id : '');
+    syncSpinCostHint();
     $('#spinModal').classList.add('open');
   }
 
   $('#newSpinBtn').addEventListener('click', () => openSpinModal(null));
+  if ($('#spinProduct')) {
+    $('#spinProduct').addEventListener('change', () => syncSpinCostHint());
+  }
   $('#closeSpinModal').addEventListener('click', () =>
     $('#spinModal').classList.remove('open')
   );
@@ -1951,6 +1986,7 @@
       sort_order: parseInt($('#spinSort').value, 10) || 0,
       active: $('#spinActive').checked ? 1 : 0,
       is_special: $('#spinSpecial') && $('#spinSpecial').checked ? 1 : 0,
+      cost_mmk: $('#spinCost') ? parseInt($('#spinCost').value, 10) || 0 : 0,
     };
     try {
       if (id) {
@@ -2479,14 +2515,24 @@
     }
     if (summaryEl) {
       if (filters.type === 'sales') {
-        summaryEl.textContent =
-          'ကာလ စုစုပေါင်း: ' + formatMMK(data.period_total_mmk || 0);
+        summaryEl.innerHTML =
+          'ကာလ <strong>စုစုပေါင်း ငွေ</strong>: ' +
+          formatMMK(data.period_total_mmk || 0) +
+          ' &nbsp;·&nbsp; ဈေးရင်း: ' +
+          formatMMK(data.period_cost_mmk || 0) +
+          ' &nbsp;·&nbsp; <strong>အမြတ်</strong>: ' +
+          formatMMK(data.period_profit_mmk || 0);
       } else {
-        summaryEl.textContent =
+        summaryEl.innerHTML =
           'ကာလ Order စုစုပေါင်း (unique ' +
           (data.unique_orders || 0) +
           '): ' +
-          formatMMK(data.period_order_total_mmk || 0);
+          formatMMK(data.period_order_total_mmk || 0) +
+          ' &nbsp;·&nbsp; ဆုဈေးရင်း: ' +
+          formatMMK(data.period_prize_cost_mmk || 0) +
+          ' &nbsp;·&nbsp; <strong>အမြတ် ≈</strong> ' +
+          formatMMK(data.period_approx_profit_mmk || 0) +
+          '<div class="hint" style="font-weight:500;margin-top:0.35rem">အမြတ် ≈ spin-order revenue − prize costs (approximate)</div>';
       }
     }
     const thead = $('#reportPreviewTable thead');
@@ -2496,7 +2542,7 @@
       thead.innerHTML =
         '<tr>' +
         '<th>Order ID</th><th>အချိန်</th><th>အမည်</th><th>ဖုန်း</th><th>လိပ်စာ</th>' +
-        '<th>ပစ္စည်းများ</th><th>စုစုပေါင်း</th><th>အခြေအနေ</th>' +
+        '<th>ပစ္စည်းများ</th><th>စုစုပေါင်း</th><th>ဈေးရင်း</th><th>အမြတ်</th><th>အခြေအနေ</th>' +
         '<th>Spin</th><th>ပြီး</th><th>စလစ်</th>' +
         '</tr>';
       tbody.innerHTML =
@@ -2511,6 +2557,8 @@
               '<td>' + escapeHtml(r.address) + '</td>' +
               '<td>' + escapeHtml(r.items_summary) + '</td>' +
               '<td>' + formatMMK(r.total_mmk) + '</td>' +
+              '<td>' + formatMMK(r.cost_total_mmk) + '</td>' +
+              '<td>' + formatMMK(r.profit_mmk) + '</td>' +
               '<td>' + escapeHtml(r.status_label || r.status) + '</td>' +
               '<td>' + (Number(r.spin_credits) || 0) + '</td>' +
               '<td>' + (Number(r.spin_completed) === 1 ? 'ဟုတ်' : '—') + '</td>' +
@@ -2519,11 +2567,11 @@
             );
           })
           .join('') ||
-        '<tr><td colspan="11" class="hint">မှတ်တမ်း မရှိပါ</td></tr>';
+        '<tr><td colspan="13" class="hint">မှတ်တမ်း မရှိပါ</td></tr>';
     } else {
       thead.innerHTML =
         '<tr>' +
-        '<th>အချိန်</th><th>Order ID</th><th>ဆု</th><th>ပစ္စည်း</th>' +
+        '<th>အချိန်</th><th>Order ID</th><th>ဆု</th><th>ပစ္စည်း</th><th>ဆုဈေးရင်း</th>' +
         '<th>အမည်</th><th>ဖုန်း</th><th>လိပ်စာ</th><th>ကျန်အခွင့်</th>' +
         '<th>Order total MMK</th>' +
         '</tr>';
@@ -2536,6 +2584,7 @@
               '<td>' + escapeHtml(r.order_id) + '</td>' +
               '<td>' + escapeHtml(r.prize_name) + '</td>' +
               '<td>' + escapeHtml(r.product_name || '—') + '</td>' +
+              '<td>' + formatMMK(r.prize_cost_mmk) + '</td>' +
               '<td>' + escapeHtml(r.customer_name) + '</td>' +
               '<td>' + escapeHtml(r.phone) + '</td>' +
               '<td>' + escapeHtml(r.address) + '</td>' +
@@ -2545,7 +2594,7 @@
             );
           })
           .join('') ||
-        '<tr><td colspan="9" class="hint">မှတ်တမ်း မရှိပါ</td></tr>';
+        '<tr><td colspan="10" class="hint">မှတ်တမ်း မရှိပါ</td></tr>';
     }
     return data;
   }

@@ -1609,3 +1609,15 @@ a.cart-btn {
     padding: 0;
   }
 }
+
+.form-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+@media (max-width: 560px) {
+  .form-row-2 { grid-template-columns: 1fr; }
+}
+.report-summary {
+  line-height: 1.45;
+}
