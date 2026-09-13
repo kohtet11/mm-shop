@@ -1328,14 +1328,40 @@
       .join('') || '<tr><td colspan="6" class="empty">အော်ဒါ မရှိသေးပါ</td></tr>';
   }
 
+
+  function originalFromSale(sale, pct) {
+    const p = Number(pct) || 0;
+    const s = Number(sale) || 0;
+    if (p <= 0 || p >= 100) return s;
+    return Math.round(s / (1 - p / 100));
+  }
+
+  function orderItemPriceHtml(it) {
+    const qty = Number(it.quantity) || 0;
+    const unitSale = Number(it.unit_price_mmk) || 0;
+    const pct = Number(it.discount_percent) || 0;
+    const saleTotal = unitSale * qty;
+    if (pct <= 0) {
+      return formatMMK(saleTotal);
+    }
+    const origTotal = originalFromSale(unitSale, pct) * qty;
+    return (
+      '<span class="price-original">' +
+      formatMMK(origTotal) +
+      '</span> <span class="price-sale">' +
+      formatMMK(saleTotal) +
+      '</span> <span class="hint">(' +
+      pct +
+      '% OFF · လက်ခံ)</span>'
+    );
+  }
+
   async function openOrder(orderId) {
     const o = await api('/api/admin/orders/' + encodeURIComponent(orderId));
     const itemsHtml = (o.items || [])
       .map(
         (it) =>
-          `<li>${escapeHtml(it.product_name)} × ${it.quantity} — ${formatMMK(
-            it.unit_price_mmk * it.quantity
-          )}</li>`
+          `<li>${escapeHtml(it.product_name)} × ${it.quantity} — ${orderItemPriceHtml(it)}</li>`
       )
       .join('');
 

@@ -125,6 +125,7 @@ function createTables(database) {
       product_name TEXT NOT NULL,
       unit_price_mmk INTEGER NOT NULL,
       cost_mmk INTEGER DEFAULT 0,
+      discount_percent INTEGER DEFAULT 0,
       quantity INTEGER NOT NULL,
       FOREIGN KEY (order_id) REFERENCES orders(order_id)
     );
@@ -427,6 +428,18 @@ function migrateOrderItemsCost(database) {
   if (!cols.length) return;
   if (!cols.includes('cost_mmk')) {
     database.exec('ALTER TABLE order_items ADD COLUMN cost_mmk INTEGER DEFAULT 0');
+  }
+  if (!cols.includes('discount_percent')) {
+    database.exec('ALTER TABLE order_items ADD COLUMN discount_percent INTEGER DEFAULT 0');
+    // Best-effort backfill from current product discounts (one-time on column add)
+    database.exec(`
+      UPDATE order_items
+      SET discount_percent = COALESCE(
+        (SELECT discount_percent FROM products WHERE products.id = order_items.product_id),
+        0
+      )
+      WHERE COALESCE(discount_percent, 0) = 0
+    `);
   }
 }
 
@@ -1213,7 +1226,7 @@ app.post('/api/orders', (req, res) => {
           for (const [pid, qty] of qtyByProduct.entries()) {
             const product = db
               .prepare(
-                'SELECT id, name, price_mmk, cost_mmk, active, stock, is_spin_credit FROM products WHERE id = ?'
+                'SELECT id, name, price_mmk, cost_mmk, discount_percent, active, stock, is_spin_credit FROM products WHERE id = ?'
               )
               .get(pid);
             if (!product) {
@@ -1253,6 +1266,7 @@ app.post('/api/orders', (req, res) => {
               product_name: product.name,
               unit_price_mmk: product.price_mmk,
               cost_mmk: Number(product.cost_mmk) || 0,
+              discount_percent: clampDiscountPercent(product.discount_percent),
               quantity: qty,
             });
           }
@@ -1270,8 +1284,8 @@ app.post('/api/orders', (req, res) => {
           ).run(orderId, nameVal, phoneVal, addressVal, notesVal, total, slipPath);
 
           const itemIns = db.prepare(
-            `INSERT INTO order_items (order_id, product_id, product_name, unit_price_mmk, cost_mmk, quantity)
-             VALUES (?, ?, ?, ?, ?, ?)`
+            `INSERT INTO order_items (order_id, product_id, product_name, unit_price_mmk, cost_mmk, discount_percent, quantity)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
           );
           for (const li of lineItems) {
             itemIns.run(
@@ -1280,6 +1294,7 @@ app.post('/api/orders', (req, res) => {
               li.product_name,
               li.unit_price_mmk,
               Number(li.cost_mmk) || 0,
+              Number(li.discount_percent) || 0,
               li.quantity
             );
           }
@@ -1636,7 +1651,7 @@ app.post('/api/spin/purchase', (req, res) => {
         const created = db.transaction(() => {
           const fresh = db
             .prepare(
-              'SELECT id, name, price_mmk, cost_mmk, active, stock, is_spin_credit FROM products WHERE id = ?'
+              'SELECT id, name, price_mmk, cost_mmk, discount_percent, active, stock, is_spin_credit FROM products WHERE id = ?'
             )
             .get(product.id);
           if (!fresh || !Number(fresh.is_spin_credit)) {
@@ -1667,14 +1682,15 @@ app.post('/api/spin/purchase', (req, res) => {
              VALUES (?, ?, ?, ?, '', ?, 'pending', ?)`
           ).run(orderId, nameVal, phoneVal, addressVal, total, slipPath);
           db.prepare(
-            `INSERT INTO order_items (order_id, product_id, product_name, unit_price_mmk, cost_mmk, quantity)
-             VALUES (?, ?, ?, ?, ?, ?)`
+            `INSERT INTO order_items (order_id, product_id, product_name, unit_price_mmk, cost_mmk, discount_percent, quantity)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
           ).run(
             orderId,
             fresh.id,
             fresh.name,
             fresh.price_mmk,
             Number(fresh.cost_mmk) || 0,
+            clampDiscountPercent(fresh.discount_percent),
             qty
           );
           return { orderId, total_mmk: total, quantity: qty };
