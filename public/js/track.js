@@ -36,21 +36,8 @@
   }
 
   function applyBranding(s) {
-    const name = (s && s.shop_name) || 'MM Shop';
-    const logoUrl = (s && s.logo_url) || '';
-    const textEl = document.getElementById('siteLogoText');
-    const imgEl = document.getElementById('siteLogoImg');
-    if (textEl) textEl.textContent = logoUrl ? name : '🛒 ' + name;
-    if (imgEl) {
-      if (logoUrl) {
-        imgEl.src = logoUrl;
-        imgEl.alt = name;
-        imgEl.classList.remove('hidden');
-      } else {
-        imgEl.removeAttribute('src');
-        imgEl.classList.add('hidden');
-      }
-    }
+    // Keep the fixed Glow Gear full-width banner; do not swap in admin logo_url.
+    const name = (s && s.shop_name) || 'Glow Gear';
     document.title = 'အော်ဒါအခြေအနေ စစ်ရန် — ' + name;
   }
 
