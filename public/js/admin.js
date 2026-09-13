@@ -145,9 +145,8 @@
   function syncProductSpinFields(product) {
     const add = $('#pSpinAdd');
     const fields = $('#pSpinFields');
-    const hit = $('#pSpinHit');
     const hint = $('#pSpinHint');
-    if (!add || !fields || !hit) return;
+    if (!add || !fields) return;
     const prizes = loadSpinPrizes._cache || [];
     const linked = product
       ? prizes.find((s) => s.product_id && Number(s.product_id) === Number(product.id))
@@ -155,14 +154,12 @@
     if (linked) {
       add.checked = true;
       fields.classList.remove('hidden');
-      hit.value = String(linked.hit_every || 10);
-      hint.textContent = 'လက်ရှိဘီး entry #' + linked.id + ' — သိမ်းရင် အပ်ဒိတ်လုပ်မည်';
+      if (hint) hint.textContent = 'လက်ရှိဘီး entry #' + linked.id + ' — သိမ်းရင် အပ်ဒိတ်လုပ်မည်';
       add.dataset.spinId = String(linked.id);
     } else {
       add.checked = false;
       fields.classList.add('hidden');
-      hit.value = '10';
-      hint.textContent = 'ပစ္စည်းအမည်ဖြင့် စပင်ဘီး entry အသစ် ထည့်မည်';
+      if (hint) hint.textContent = 'ပစ္စည်းအမည်ဖြင့် စပင်ဘီး entry အသစ် ထည့်မည်';
       delete add.dataset.spinId;
     }
   }
@@ -252,12 +249,11 @@
       try {
         const addEl = $('#pSpinAdd');
         if (addEl && addEl.checked && saved && saved.id) {
-          const hitEvery = Math.max(1, parseInt($('#pSpinHit').value, 10) || 10);
           const spinId = addEl.dataset.spinId;
           const payload = {
             name: String(saved.name || $('#pName').value.trim()),
             product_id: saved.id,
-            hit_every: hitEvery,
+            hit_every: 1,
             active: 1,
             sort_order: 0,
           };
@@ -760,7 +756,6 @@
         <td><strong>${escapeHtml(s.name)}</strong></td>
         <td>${prod}</td>
         <td>${specialBadge}</td>
-        <td><code>1/${Number(s.hit_every) || 1}</code></td>
         <td>${Number(s.sort_order) || 0}</td>
         <td>${s.active ? '<span class="badge paid_confirmed">active</span>' : '<span class="badge cancelled">inactive</span>'}</td>
         <td class="row-actions">
@@ -770,7 +765,7 @@
       </tr>`;
         })
         .join('') ||
-      '<tr><td colspan="7" class="empty">ဆု မရှိသေးပါ — စတိုးတွင် စပင်ဘီး ပုန်းနေမည်</td></tr>';
+      '<tr><td colspan="6" class="empty">ဆု မရှိသေးပါ — စတိုးတွင် စပင်ဘီး ပုန်းနေမည်</td></tr>';
     return prizes;
   }
 
@@ -830,7 +825,6 @@
     $('#spinModalTitle').textContent = prize ? 'ဆု ပြင်ဆင်ရန်' : 'ဆု အသစ်';
     $('#spinId').value = prize ? prize.id : '';
     $('#spinName').value = prize ? prize.name : '';
-    $('#spinHitEvery').value = prize ? prize.hit_every : 10;
     $('#spinSort').value = prize ? prize.sort_order : 0;
     $('#spinActive').checked = prize ? !!prize.active : true;
     const specialEl = $('#spinSpecial');
@@ -853,7 +847,7 @@
     const payload = {
       name: $('#spinName').value.trim(),
       product_id: $('#spinProduct').value || null,
-      hit_every: Math.max(1, parseInt($('#spinHitEvery').value, 10) || 1),
+      hit_every: 1,
       sort_order: parseInt($('#spinSort').value, 10) || 0,
       active: $('#spinActive').checked ? 1 : 0,
       is_special: $('#spinSpecial') && $('#spinSpecial').checked ? 1 : 0,
