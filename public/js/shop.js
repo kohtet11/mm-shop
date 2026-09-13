@@ -3,6 +3,8 @@
   const MY_ORDERS_KEY = 'mm_shop_my_orders';
   const MY_ORDERS_MAX = 20;
   let products = [];
+  let productQuery = '';
+  let productCategory = 'blind_box';
   let cart = loadCart();
   let payment = null;
   let myOrdersPollTimer = null;
@@ -80,6 +82,61 @@
     }
   }
 
+  function buyerSpinWinsHtml(plays, opts) {
+    const list = Array.isArray(plays) ? plays : [];
+    if (!list.length) return '';
+    const linkProducts = !!(opts && opts.linkProducts);
+    const items = list
+      .map((p) => {
+        const name = p.name || p.prize_name || '';
+        const when = formatOrderDate(p.created_at);
+        const pid = p.product_id != null && p.product_id !== '' ? Number(p.product_id) : NaN;
+        const hasPid = Number.isFinite(pid);
+        const prodLabel = p.product_name
+          ? escapeHtml(p.product_name)
+          : hasPid
+            ? 'ပစ္စည်း #' + pid
+            : '—';
+        const prodHtml =
+          linkProducts && hasPid
+            ? `<button type="button" class="linkish" data-goto-product="${pid}">ရရှိသောပစ္စည်း: ${prodLabel}</button>`
+            : `<span class="hint">ရရှိသောပစ္စည်း: ${prodLabel}</span>`;
+        return `<li><strong>${escapeHtml(name)}</strong> ${prodHtml}<span class="hint">${escapeHtml(when)}</span></li>`;
+      })
+      .join('');
+    return `<div class="buyer-spin-wins"><div class="buyer-spin-wins-title">စပင်ရရှိမှုများ</div><ul>${items}</ul></div>`;
+  }
+
+  function renderSpinUnlockWins(plays) {
+    const box = $('#spinWinsBox');
+    const list = $('#spinWinsList');
+    if (!box || !list) return;
+    const rows = Array.isArray(plays) ? plays : [];
+    if (!rows.length) {
+      list.innerHTML = '';
+      box.classList.add('hidden');
+      return;
+    }
+    list.innerHTML = rows
+      .map((p) => {
+        const name = p.name || p.prize_name || '';
+        const when = formatOrderDate(p.created_at);
+        const pid = p.product_id != null && p.product_id !== '' ? Number(p.product_id) : NaN;
+        const hasPid = Number.isFinite(pid);
+        const prodLabel = p.product_name
+          ? escapeHtml(p.product_name)
+          : hasPid
+            ? 'ပစ္စည်း #' + pid
+            : '—';
+        const prodHtml = hasPid
+          ? `<button type="button" class="linkish" data-goto-product="${pid}">ရရှိသောပစ္စည်း: ${prodLabel}</button>`
+          : `<span class="hint">ရရှိသောပစ္စည်း: ${prodLabel}</span>`;
+        return `<li><strong>${escapeHtml(name)}</strong> ${prodHtml}<span class="hint">${escapeHtml(when)}</span></li>`;
+      })
+      .join('');
+    box.classList.remove('hidden');
+  }
+
   function renderMyOrdersSkeleton() {
     const list = loadMyOrders();
     const el = $('#myOrdersList');
@@ -151,6 +208,7 @@
               <span>${formatMMK(data.total_mmk)}</span>
               <span class="hint">${escapeHtml(when)}</span>
             </div>
+            ${buyerSpinWinsHtml(data.spin_plays, { linkProducts: true })}
           </div>`);
       } catch (_) {
         kept.push(o);
@@ -241,6 +299,12 @@
     renderPayment();
   }
 
+  function authenticityBadgeHtml(p) {
+    const a = String(p && p.authenticity ? p.authenticity : 'authentic').toLowerCase();
+    if (a === 'copy') return '<span class="auth-badge copy">Copy</span>';
+    return '<span class="auth-badge authentic">Authentic</span>';
+  }
+
   function discountBadgeHtml(pct) {
     const n = Number(pct) || 0;
     if (n <= 0) return '';
@@ -322,6 +386,20 @@
   }
 
   function scrollToProduct(productId) {
+    const p = products.find((x) => Number(x.id) === Number(productId));
+    if (p) {
+      const cat = String(p.category || 'other');
+      if (productCategory !== 'all' && productCategory !== cat) {
+        productCategory = cat;
+        syncCategoryChips();
+      }
+      if (productQuery) {
+        productQuery = '';
+        const searchEl = $('#productSearch');
+        if (searchEl) searchEl.value = '';
+      }
+      renderProducts();
+    }
     const card = document.getElementById('product-' + productId);
     if (!card) return;
     card.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -338,13 +416,57 @@
     return Number.isFinite(n) ? n : 0;
   }
 
+  function normalizeSearch(s) {
+    return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+
+  function productMatchesQuery(p, q) {
+    if (!q) return true;
+    const name = String(p && p.name ? p.name : '').toLowerCase();
+    const desc = String(p && p.description ? p.description : '').toLowerCase();
+    return name.includes(q) || desc.includes(q);
+  }
+
+  function productMatchesCategory(p, cat) {
+    if (!cat || cat === 'all') return true;
+    return String(p && p.category ? p.category : 'other') === cat;
+  }
+
+  function visibleProducts() {
+    const q = normalizeSearch(productQuery);
+    return products.filter((p) => {
+      if (!productMatchesCategory(p, productCategory)) return false;
+      if (q && !productMatchesQuery(p, q)) return false;
+      return true;
+    });
+  }
+
+  function syncCategoryChips() {
+    $$('#categoryChips [data-category]').forEach((btn) => {
+      const on = btn.dataset.category === productCategory;
+      btn.classList.toggle('active', on);
+      if (on) btn.setAttribute('aria-current', 'true');
+      else btn.removeAttribute('aria-current');
+    });
+  }
+
   function renderProducts() {
     const grid = $('#productsGrid');
+    if (!grid) return;
+    syncCategoryChips();
     if (!products.length) {
       grid.innerHTML = '<div class="empty">ပစ္စည်း မရှိသေးပါ</div>';
       return;
     }
-    grid.innerHTML = products
+    const q = normalizeSearch(productQuery);
+    const shown = visibleProducts();
+    if (!shown.length) {
+      grid.innerHTML = q
+        ? '<div class="empty">ပစ္စည်း မတွေ့ပါ</div>'
+        : '<div class="empty">ဤအမျိုးအစားတွင် ပစ္စည်း မရှိသေးပါ</div>';
+      return;
+    }
+    grid.innerHTML = shown
       .map((p) => {
         const stock = productStock(p);
         const out = stock <= 0;
@@ -352,6 +474,7 @@
       <article class="product-card${out ? ' out-of-stock' : ''}" id="product-${p.id}" data-id="${p.id}">
         <div class="thumb-wrap">
           <img class="thumb" src="${imgUrl(p.image_path)}" alt="${escapeHtml(p.name)}" loading="lazy" />
+          ${authenticityBadgeHtml(p)}
           ${discountBadgeHtml(p.discount_percent)}
           ${out ? '<span class="stock-badge">စတော့ကုန် / Out of stock</span>' : ''}
         </div>
@@ -528,6 +651,13 @@
 
   // Events
   document.addEventListener('click', (e) => {
+    const catBtn = e.target.closest('#categoryChips [data-category]');
+    if (catBtn) {
+      productCategory = catBtn.dataset.category || 'all';
+      syncCategoryChips();
+      renderProducts();
+      return;
+    }
     const promoSlide = e.target.closest('[data-promo-product]');
     if (promoSlide) {
       scrollToProduct(Number(promoSlide.dataset.promoProduct));
@@ -576,6 +706,13 @@
     const rem = e.target.closest('[data-remove]');
     if (rem) {
       removeFromCart(Number(rem.dataset.remove));
+      return;
+    }
+    const goto = e.target.closest('[data-goto-product]');
+    if (goto) {
+      const pid = Number(goto.dataset.gotoProduct);
+      closeOverlay('cartOverlay');
+      scrollToProduct(pid);
       return;
     }
     if (e.target === $('#cartOverlay')) {
@@ -935,6 +1072,7 @@
           msg.classList.remove('ok');
         }
       }
+      renderSpinUnlockWins(data.spin_plays);
       updateSpinButton();
     } catch (err) {
       spinCredits = 0;
@@ -943,6 +1081,7 @@
       spinCompleted = false;
       spinUnlockedOrderId = '';
       saveSpinSession();
+      renderSpinUnlockWins([]);
       if (msg) {
         msg.textContent = err.message || 'မရရှိနိုင်ပါ';
         msg.classList.remove('ok');
@@ -992,6 +1131,7 @@
 
       await animateSpinTo(idx, 4200);
       showSpinResult(data);
+      renderSpinUnlockWins(data.spin_plays);
       const msg = $('#spinUnlockMsg');
       if (msg) {
         if (spinExpired) {
@@ -1039,6 +1179,14 @@
     if (!spinPrizes.length) return;
     drawSpinWheel(spinRotation);
   });
+
+  const searchEl = $('#productSearch');
+  if (searchEl) {
+    searchEl.addEventListener('input', () => {
+      productQuery = searchEl.value || '';
+      renderProducts();
+    });
+  }
 
   updateCartCount();
   fetchProducts();

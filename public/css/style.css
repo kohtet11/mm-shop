@@ -27,6 +27,17 @@ body {
 
 a { color: var(--teal-dark); text-decoration: none; }
 img { max-width: 100%; display: block; }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 
 .container {
   width: min(1100px, 100% - 2rem);
@@ -119,6 +130,70 @@ img { max-width: 100%; display: block; }
 }
 .hero p { margin: 0; color: var(--muted); font-size: 0.95rem; }
 
+.product-browse {
+  margin: 0.75rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+.category-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+.category-chips .chip {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  padding: 0.4rem 0.8rem;
+  border-radius: 999px;
+  cursor: pointer;
+  line-height: 1.3;
+}
+.category-chips .chip.active {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #fff;
+}
+.category-chips .chip:focus-visible {
+  outline: 2px solid rgba(13, 148, 136, 0.45);
+  outline-offset: 2px;
+}
+@media (max-width: 560px) {
+  .category-chips .chip {
+    font-size: 0.86rem;
+    padding: 0.45rem 0.75rem;
+  }
+}
+
+.product-search {
+  margin: 0;
+}
+.product-search input[type="search"] {
+  width: 100%;
+  max-width: 100%;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font: inherit;
+  background: #fff;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
+}
+.product-search input[type="search"]:focus {
+  outline: 2px solid rgba(13, 148, 136, 0.35);
+  border-color: var(--teal);
+}
+@media (max-width: 560px) {
+  .product-search input[type="search"] {
+    font-size: 1rem;
+    padding: 0.75rem 0.85rem;
+  }
+}
+
 .products-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -147,6 +222,30 @@ img { max-width: 100%; display: block; }
   width: 100%;
   height: 100%;
   display: block;
+}
+.auth-badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0.22rem 0.5rem;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+  line-height: 1.15;
+}
+.auth-badge.authentic {
+  background: #d1fae5;
+  color: #065f46;
+}
+.auth-badge.copy {
+  background: #fef3c7;
+  color: #92400e;
+}
+.thumb-wrap .auth-badge {
+  position: absolute;
+  top: 0.65rem;
+  left: 0.65rem;
+  z-index: 2;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
 }
 .discount-badge {
   position: absolute;
@@ -688,7 +787,7 @@ a.cart-btn {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
-  max-height: 220px;
+  max-height: 360px;
   overflow-y: auto;
 }
 .my-order-card {
@@ -713,6 +812,64 @@ a.cart-btn {
 .my-order-card.unavailable {
   opacity: 0.7;
 }
+
+.buyer-spin-wins {
+  margin-top: 0.55rem;
+  padding-top: 0.45rem;
+  border-top: 1px dashed rgba(148, 163, 184, 0.45);
+}
+.buyer-spin-wins h3,
+.buyer-spin-wins-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+.buyer-spin-wins ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.buyer-spin-wins li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.88rem;
+}
+.buyer-spin-wins .linkish {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: var(--teal-dark);
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.track-result .buyer-spin-wins {
+  margin-top: 0.9rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f8fafc;
+}
+.spin-unlock-wins {
+  margin-top: 0.65rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgba(196, 181, 253, 0.35);
+  border-radius: 10px;
+  background: rgba(15, 10, 26, 0.35);
+}
+.spin-unlock-wins .buyer-spin-wins-title {
+  color: #e9d5ff;
+}
+.spin-unlock-wins li strong { color: #f5f3ff; }
+.spin-unlock-wins .hint { color: #c4b5fd; }
+.spin-unlock-wins .linkish { color: #c4b5fd; }
 
 /* ========== Spin wheel (Glow Gear neon) ========== */
 .spin-section {

@@ -46,6 +46,10 @@
           </div>
           <button type="button" class="btn btn-outline" id="spinUnlockBtn">ကံစမ်းခွင့် စစ်မည်</button>
           <p class="hint" id="spinUnlockMsg"></p>
+          <div id="spinWinsBox" class="buyer-spin-wins spin-unlock-wins hidden">
+            <div class="buyer-spin-wins-title">စပင်ရရှိမှုများ</div>
+            <ul id="spinWinsList"></ul>
+          </div>
         </div>
         <div class="spin-stage">
           <div class="spin-pointer" aria-hidden="true"></div>
@@ -59,6 +63,18 @@
       <h1>စုဆောင်းပစ္စည်းများ</h1>
       <p>အိမ်အရောက်ပို့ — ဘဏ်လွှဲငွေဖြင့် အော်ဒါတင်ပါ</p>
     </section>
+    <div class="product-browse" id="productBrowse">
+      <nav class="category-chips" id="categoryChips" aria-label="ပစ္စည်း အမျိုးအစား">
+        <button type="button" class="chip" data-category="all">အားလုံး</button>
+        <button type="button" class="chip active" data-category="blind_box" aria-current="true">Blind box</button>
+        <button type="button" class="chip" data-category="accessories">Accessories</button>
+        <button type="button" class="chip" data-category="spin_game">Spin wheel</button>
+      </nav>
+      <div class="product-search" id="productSearchBox">
+        <label class="sr-only" for="productSearch">ပစ္စည်း ရှာရန်</label>
+        <input type="search" id="productSearch" placeholder="ပစ္စည်း ရှာရန်…" autocomplete="off" enterkeyhint="search" />
+      </div>
+    </div>
     <section class="products-grid" id="productsGrid">
       <div class="empty">ပစ္စည်းများ ဖတ်နေသည်…</div>
     </section>

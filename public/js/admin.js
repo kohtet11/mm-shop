@@ -121,6 +121,7 @@
           if (pct > 0) bannerBits.push('<span class="badge pending">' + pct + '% OFF</span>');
           const bannerCell = bannerBits.length ? bannerBits.join(' ') : '<span class="hint">—</span>';
           const stock = Number.isFinite(Number(p.stock)) ? Number(p.stock) : 0;
+          const catLabel = { blind_box: 'Blind box', accessories: 'Accessories', spin_game: 'Spin wheel · ဂိမ်း', other: 'အခြား' }[p.category] || p.category || 'အခြား';
           return `
       <tr>
         <td>${p.image_path ? `<img class="thumb-sm" src="${imgUrl(p.image_path)}" alt="" />` : '—'}</td>
@@ -128,6 +129,7 @@
           <strong>${escapeHtml(p.name)}</strong>
           <div class="hint">${escapeHtml((p.description || '').slice(0, 80))}</div>
         </td>
+        <td><span class="hint">${escapeHtml(catLabel)}</span></td>
         <td>${formatMMK(p.price_mmk)}</td>
         <td>
           <div class="stock-adjust">
@@ -145,7 +147,7 @@
       </tr>`;
         }
       )
-      .join('') || '<tr><td colspan="7" class="empty">ပစ္စည်း မရှိသေးပါ</td></tr>';
+      .join('') || '<tr><td colspan="8" class="empty">ပစ္စည်း မရှိသေးပါ</td></tr>';
 
     loadProducts._cache = products;
   }
@@ -185,6 +187,16 @@
     $('#pOnBanner').checked = product ? !!product.on_banner : false;
     const pSpinCredit = $('#pSpinCredit');
     if (pSpinCredit) pSpinCredit.checked = product ? !!Number(product.is_spin_credit) : false;
+    const pCat = $('#pCategory');
+    if (pCat) {
+      const raw = product && product.category ? String(product.category) : '';
+      pCat.value = raw || (pSpinCredit && pSpinCredit.checked ? 'spin_game' : 'blind_box');
+    }
+    const isCopy = product && String(product.authenticity || '') === 'copy';
+    const authCopy = $('#pAuthCopy');
+    const authAuthentic = $('#pAuthAuthentic');
+    if (authCopy) authCopy.checked = !!isCopy;
+    if (authAuthentic) authAuthentic.checked = !isCopy;
     const pct = product ? String(Number(product.discount_percent) || 0) : '0';
     const discSel = $('#pDiscount');
     if (discSel) {
@@ -203,6 +215,17 @@
       : '';
     syncProductSpinFields(product);
     $('#productModal').classList.add('open');
+  }
+
+  const pSpinCreditEl = $('#pSpinCredit');
+  if (pSpinCreditEl) {
+    pSpinCreditEl.addEventListener('change', () => {
+      const pCat = $('#pCategory');
+      if (!pCat) return;
+      if (pSpinCreditEl.checked && (pCat.value === 'other' || pCat.value === 'blind_box' || !pCat.value)) {
+        pCat.value = 'spin_game';
+      }
+    });
   }
 
   const pSpinAddEl = $('#pSpinAdd');
@@ -229,6 +252,8 @@
     fd.append('price_mmk', $('#pPrice').value);
     fd.append('stock', $('#pStock') ? $('#pStock').value : '99');
     fd.append('is_spin_credit', $('#pSpinCredit') && $('#pSpinCredit').checked ? '1' : '0');
+    fd.append('category', $('#pCategory') ? $('#pCategory').value : 'other');
+    fd.append('authenticity', $('#pAuthCopy') && $('#pAuthCopy').checked ? 'copy' : 'authentic');
     fd.append('description', $('#pDesc').value);
     fd.append('active', $('#pActive').checked ? '1' : '0');
     fd.append('on_banner', $('#pOnBanner').checked ? '1' : '0');

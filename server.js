@@ -91,6 +91,8 @@ function createTables(database) {
       discount_percent INTEGER DEFAULT 0,
       stock INTEGER DEFAULT 99,
       is_spin_credit INTEGER DEFAULT 0,
+      category TEXT DEFAULT 'other',
+      authenticity TEXT DEFAULT 'authentic',
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -194,6 +196,42 @@ function migrateProductsColumns(database) {
   if (!cols.includes('is_spin_credit')) {
     database.exec('ALTER TABLE products ADD COLUMN is_spin_credit INTEGER DEFAULT 0');
   }
+  if (!cols.includes('category')) {
+    database.exec("ALTER TABLE products ADD COLUMN category TEXT DEFAULT 'other'");
+  }
+  if (!cols.includes('authenticity')) {
+    database.exec("ALTER TABLE products ADD COLUMN authenticity TEXT DEFAULT 'authentic'");
+  }
+  // is_spin_credit items default to spin_game; leave explicit categories intact
+  database.exec(
+    `UPDATE products SET category = 'spin_game'
+     WHERE COALESCE(is_spin_credit, 0) = 1
+       AND (category IS NULL OR TRIM(category) = '' OR category = 'other')`
+  );
+}
+
+const PRODUCT_CATEGORIES = ['blind_box', 'accessories', 'spin_game', 'other'];
+
+function normalizeProductCategory(value, fallback = 'other') {
+  const s = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (PRODUCT_CATEGORIES.includes(s)) return s;
+  return fallback;
+}
+
+function categoryForProduct(input, isSpinCredit) {
+  const spin = !!Number(isSpinCredit);
+  const raw = input === undefined || input === null ? '' : String(input).trim();
+  if (spin && !raw) return 'spin_game';
+  const cat = normalizeProductCategory(raw, spin ? 'spin_game' : 'other');
+  if (spin && cat === 'other') return 'spin_game';
+  return cat;
+}
+
+function normalizeAuthenticity(value, fallback = 'authentic') {
+  const s = String(value || '').trim().toLowerCase();
+  if (s === 'copy' || s === 'replica' || s === 'fake') return 'copy';
+  if (s === 'authentic' || s === 'original' || s === 'auth') return 'authentic';
+  return fallback;
 }
 
 function migrateOrdersSpinCredits(database) {
@@ -297,6 +335,37 @@ function getOrderSpinPlayCount(database, orderId) {
   return Number(row && row.c) || 0;
 }
 
+/** Public/buyer spin wins for one order: prize name, linked product, time. */
+function listOrderSpinPlays(database, orderId) {
+  const oid = String(orderId || '').trim();
+  if (!oid) return [];
+  return database
+    .prepare(
+      `SELECT
+         sp.id,
+         sp.prize_id,
+         sp.prize_name,
+         sp.created_at,
+         spr.product_id AS product_id,
+         p.name AS product_name
+       FROM spin_plays sp
+       LEFT JOIN spin_prizes spr ON spr.id = sp.prize_id
+       LEFT JOIN products p ON p.id = spr.product_id
+       WHERE sp.order_id = ?
+       ORDER BY datetime(sp.created_at) DESC, sp.id DESC`
+    )
+    .all(oid)
+    .map((r) => ({
+      id: r.id,
+      name: r.prize_name,
+      prize_name: r.prize_name,
+      prize_id: r.prize_id || null,
+      product_id: r.product_id || null,
+      product_name: r.product_name || null,
+      created_at: r.created_at,
+    }));
+}
+
 /**
  * Per-order 15-spin cycle: spins 15, 30, 45… use special pool; other spins use normal.
  * hit_every is kept in DB but ignored here (uniform random within chosen pool).
@@ -390,6 +459,7 @@ const BUILTIN_SAMPLES = [
     prize_name: 'Skullpanda Blind Box',
     is_special: 1,
     prize_sort: 1,
+    category: 'blind_box',
   },
   {
     slug: 'nommi',
@@ -403,6 +473,7 @@ const BUILTIN_SAMPLES = [
     prize_name: 'Nommi Mini Figure',
     is_special: 0,
     prize_sort: 2,
+    category: 'blind_box',
   },
   {
     slug: 'zootopia',
@@ -416,6 +487,7 @@ const BUILTIN_SAMPLES = [
     prize_name: 'Zootopia Collectible',
     is_special: 0,
     prize_sort: 3,
+    category: 'blind_box',
   },
   {
     slug: 'spin-chance',
@@ -427,6 +499,7 @@ const BUILTIN_SAMPLES = [
     discount_percent: 0,
     stock: 99,
     is_spin_credit: 1,
+    category: 'spin_game',
   },
 ];
 
@@ -455,14 +528,17 @@ function isSampleImagePath(current, sample) {
 function seedBuiltins(database) {
   const findProductByName = database.prepare('SELECT * FROM products WHERE name = ?');
   const insertProduct = database.prepare(
-    `INSERT INTO products (name, price_mmk, description, image_path, active, on_banner, discount_percent, stock, is_spin_credit)
-     VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)`
+    `INSERT INTO products (name, price_mmk, description, image_path, active, on_banner, discount_percent, stock, is_spin_credit, category, authenticity)
+     VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`
   );
   const updateProductImage = database.prepare(
     `UPDATE products SET image_path = ?, updated_at = datetime('now') WHERE id = ?`
   );
   const updateSpinCreditFlag = database.prepare(
     `UPDATE products SET is_spin_credit = ?, updated_at = datetime('now') WHERE id = ?`
+  );
+  const updateProductCategory = database.prepare(
+    `UPDATE products SET category = ?, updated_at = datetime('now') WHERE id = ?`
   );
   const findPrizeByProduct = database.prepare(
     'SELECT * FROM spin_prizes WHERE product_id = ? LIMIT 1'
@@ -494,9 +570,16 @@ function seedBuiltins(database) {
         sample.on_banner,
         sample.discount_percent,
         sample.stock != null ? sample.stock : 99,
-        sample.is_spin_credit ? 1 : 0
+        sample.is_spin_credit ? 1 : 0,
+        categoryForProduct(sample.category, sample.is_spin_credit),
+        normalizeAuthenticity(sample.authenticity, 'authentic')
       );
-      row = { id: result.lastInsertRowid, image_path: sample.image_path, is_spin_credit: sample.is_spin_credit ? 1 : 0 };
+      row = {
+        id: result.lastInsertRowid,
+        image_path: sample.image_path,
+        is_spin_credit: sample.is_spin_credit ? 1 : 0,
+        category: categoryForProduct(sample.category, sample.is_spin_credit),
+      };
       addedProducts += 1;
     } else if (isSampleImagePath(row.image_path, sample) && String(row.image_path || '') !== sample.image_path) {
       updateProductImage.run(sample.image_path, row.id);
@@ -506,6 +589,16 @@ function seedBuiltins(database) {
     if (Number(row.is_spin_credit || 0) !== wantSpinCredit && sample.is_spin_credit) {
       updateSpinCreditFlag.run(wantSpinCredit, row.id);
       row.is_spin_credit = wantSpinCredit;
+    }
+    const wantCat = categoryForProduct(sample.category, wantSpinCredit);
+    const currentCat = String(row.category || '').trim();
+    const shouldSetCat =
+      !currentCat ||
+      currentCat === 'other' ||
+      (wantSpinCredit && currentCat !== 'spin_game');
+    if (shouldSetCat && currentCat !== wantCat) {
+      updateProductCategory.run(wantCat, row.id);
+      row.category = wantCat;
     }
     productIds[sample.slug] = row.id;
   }
@@ -863,7 +956,7 @@ function formatOrder(row, items) {
 app.get('/api/products', (_req, res) => {
   const products = db
     .prepare(
-      `SELECT id, name, price_mmk, description, image_path, active, on_banner, discount_percent, stock, is_spin_credit
+      `SELECT id, name, price_mmk, description, image_path, active, on_banner, discount_percent, stock, is_spin_credit, category, authenticity
        FROM products WHERE active = 1 ORDER BY id DESC`
     )
     .all();
@@ -1117,6 +1210,7 @@ function trackOrderHandler(req, res) {
       spin_locked: spin.locked,
       spin_completed: Number(order.spin_completed) === 1 ? 1 : 0,
       is_spin_order: spinRelated,
+      spin_plays: listOrderSpinPlays(db, order.order_id),
       items: items.map((it) => ({
         product_name: it.product_name,
         unit_price_mmk: it.unit_price_mmk,
@@ -1359,6 +1453,7 @@ function spinUnlockHandler(req, res) {
       spin_completed: Number(order.spin_completed) === 1 ? 1 : 0,
       spinCompleted: Number(order.spin_completed) === 1,
       is_spin_order: orderIsSpinRelated(db, order),
+      spin_plays: listOrderSpinPlays(db, order.order_id),
     });
   } catch (e) {
     console.error(e);
@@ -1453,6 +1548,7 @@ app.post('/api/spin', (req, res) => {
       nextInCycle: (nextSpinNumber % SPIN_CYCLE_SIZE) || SPIN_CYCLE_SIZE,
       spin_completed: Number(leftOrder.spin_completed) === 1 ? 1 : 0,
       spinCompleted: Number(leftOrder.spin_completed) === 1,
+      spin_plays: listOrderSpinPlays(db, order.order_id),
     });
   } catch (e) {
     console.error(e);
@@ -1511,7 +1607,7 @@ app.get('/api/admin/me', (req, res) => {
 app.get('/api/admin/products', requireAdmin, (_req, res) => {
   const products = db
     .prepare(
-      `SELECT id, name, price_mmk, description, image_path, active, on_banner, discount_percent, stock, is_spin_credit, created_at, updated_at
+      `SELECT id, name, price_mmk, description, image_path, active, on_banner, discount_percent, stock, is_spin_credit, category, authenticity, created_at, updated_at
        FROM products ORDER BY id DESC`
     )
     .all();
@@ -1522,7 +1618,7 @@ app.post('/api/admin/products', requireAdmin, (req, res) => {
   uploadProduct.single('image')(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message });
     try {
-      const { name, price_mmk, description, active, on_banner, discount_percent, stock, is_spin_credit } = req.body;
+      const { name, price_mmk, description, active, on_banner, discount_percent, stock, is_spin_credit, category, authenticity } = req.body;
       if (!name || price_mmk === undefined) {
         return res.status(400).json({ error: 'name and price required' });
       }
@@ -1532,10 +1628,12 @@ app.post('/api/admin/products', requireAdmin, (req, res) => {
       const discount = clampDiscountPercent(discount_percent);
       const stockVal = parseStock(stock, 99);
       const spinCredit = parseBoolFlag(is_spin_credit, 0);
+      const cat = categoryForProduct(category, spinCredit);
+      const auth = normalizeAuthenticity(authenticity, 'authentic');
       const result = db
         .prepare(
-          `INSERT INTO products (name, price_mmk, description, image_path, active, on_banner, discount_percent, stock, is_spin_credit)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO products (name, price_mmk, description, image_path, active, on_banner, discount_percent, stock, is_spin_credit, category, authenticity)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           String(name).trim(),
@@ -1546,7 +1644,9 @@ app.post('/api/admin/products', requireAdmin, (req, res) => {
           isBanner,
           discount,
           stockVal,
-          spinCredit
+          spinCredit,
+          cat,
+          auth
         );
       const product = db.prepare('SELECT * FROM products WHERE id = ?').get(result.lastInsertRowid);
       res.json(product);
@@ -1565,7 +1665,7 @@ app.put('/api/admin/products/:id', requireAdmin, (req, res) => {
       const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
       if (!existing) return res.status(404).json({ error: 'Not found' });
 
-      const { name, price_mmk, description, active, on_banner, discount_percent, stock, is_spin_credit } = req.body;
+      const { name, price_mmk, description, active, on_banner, discount_percent, stock, is_spin_credit, category, authenticity } = req.body;
       let image_path = existing.image_path;
       if (req.file) {
         image_path = `products/${req.file.filename}`;
@@ -1591,10 +1691,18 @@ app.put('/api/admin/products/:id', requireAdmin, (req, res) => {
         is_spin_credit === undefined
           ? (Number(existing.is_spin_credit) ? 1 : 0)
           : parseBoolFlag(is_spin_credit, 0);
+      const cat =
+        category === undefined
+          ? categoryForProduct(existing.category, spinCredit)
+          : categoryForProduct(category, spinCredit);
+      const auth =
+        authenticity === undefined
+          ? normalizeAuthenticity(existing.authenticity, 'authentic')
+          : normalizeAuthenticity(authenticity, 'authentic');
 
       db.prepare(
         `UPDATE products SET name = ?, price_mmk = ?, description = ?, image_path = ?,
-         active = ?, on_banner = ?, discount_percent = ?, stock = ?, is_spin_credit = ?, updated_at = datetime('now') WHERE id = ?`
+         active = ?, on_banner = ?, discount_percent = ?, stock = ?, is_spin_credit = ?, category = ?, authenticity = ?, updated_at = datetime('now') WHERE id = ?`
       ).run(
         name !== undefined ? String(name).trim() : existing.name,
         price_mmk !== undefined ? parseInt(price_mmk, 10) || 0 : existing.price_mmk,
@@ -1605,6 +1713,8 @@ app.put('/api/admin/products/:id', requireAdmin, (req, res) => {
         discount,
         stockVal,
         spinCredit,
+        cat,
+        auth,
         id
       );
 

@@ -116,6 +116,41 @@
         }
       }
 
+      const winsBox = $('#resultSpinWins');
+      const winsList = $('#resultSpinWinsList');
+      const plays = Array.isArray(data.spin_plays) ? data.spin_plays : [];
+      if (winsBox && winsList) {
+        if (plays.length) {
+          winsList.innerHTML = plays
+            .map((p) => {
+              const name = p.name || p.prize_name || '';
+              const prod = p.product_name
+                ? escapeHtml(p.product_name)
+                : p.product_id
+                  ? 'ပစ္စည်း #' + escapeHtml(p.product_id)
+                  : '—';
+              return (
+                '<li>' +
+                '<strong>' +
+                escapeHtml(name) +
+                '</strong>' +
+                '<div class="hint">ရရှိသောပစ္စည်း: ' +
+                prod +
+                '</div>' +
+                '<div class="hint">' +
+                escapeHtml(formatTime(p.created_at)) +
+                '</div>' +
+                '</li>'
+              );
+            })
+            .join('');
+          winsBox.classList.remove('hidden');
+        } else {
+          winsList.innerHTML = '';
+          winsBox.classList.add('hidden');
+        }
+      }
+
       const items = Array.isArray(data.items) ? data.items : [];
       if (!items.length) {
         $('#resultItems').innerHTML = '<div class="empty">ပစ္စည်း မရှိပါ</div>';
