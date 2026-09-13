@@ -165,6 +165,23 @@ function migrateOrdersSpinCredits(database) {
   }
 }
 
+function migrateSpinPlaysColumns(database) {
+  const cols = database.prepare('PRAGMA table_info(spin_plays)').all().map((c) => c.name);
+  if (!cols.length) return;
+  if (!cols.includes('order_id')) {
+    database.exec("ALTER TABLE spin_plays ADD COLUMN order_id TEXT NOT NULL DEFAULT ''");
+  }
+  if (!cols.includes('prize_id')) {
+    database.exec('ALTER TABLE spin_plays ADD COLUMN prize_id INTEGER');
+  }
+  if (!cols.includes('prize_name')) {
+    database.exec("ALTER TABLE spin_plays ADD COLUMN prize_name TEXT NOT NULL DEFAULT ''");
+  }
+  if (!cols.includes('created_at')) {
+    database.exec("ALTER TABLE spin_plays ADD COLUMN created_at TEXT DEFAULT (datetime('now'))");
+  }
+}
+
 function clampDiscountPercent(value) {
   const n = parseInt(value, 10);
   if (!Number.isFinite(n) || n <= 0) return 0;
@@ -451,6 +468,7 @@ function requirePasswordBody(req, res) {
 function deleteOrderById(database, orderId) {
   const o = database.prepare('SELECT * FROM orders WHERE order_id = ?').get(orderId);
   if (!o) return null;
+  database.prepare('DELETE FROM spin_plays WHERE order_id = ?').run(orderId);
   database.prepare('DELETE FROM order_items WHERE order_id = ?').run(orderId);
   database.prepare('DELETE FROM orders WHERE order_id = ?').run(orderId);
   unlinkUploadRel(o.slip_path);
@@ -567,7 +585,10 @@ app.post('/api/orders', (req, res) => {
     }
     try {
       const { customer_name, phone, address, notes, items } = req.body;
-      if (!customer_name || !phone || !address) {
+      const nameVal = String(customer_name || '').trim();
+      const phoneVal = String(phone || '').trim();
+      const addressVal = String(address || '').trim();
+      if (!nameVal || !phoneVal || !addressVal) {
         return res.status(400).json({ error: 'အမည်၊ ဖုန်းနှင့် လိပ်စာ လိုအပ်သည်' });
       }
       if (!req.file) {
@@ -611,9 +632,9 @@ app.post('/api/orders', (req, res) => {
          VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`
       ).run(
         orderId,
-        String(customer_name).trim(),
-        String(phone).trim(),
-        String(address).trim(),
+        nameVal,
+        phoneVal,
+        addressVal,
         notes ? String(notes).trim() : '',
         total,
         slipPath
@@ -761,14 +782,47 @@ function findOrderForSpin(orderId, phone) {
   return order;
 }
 
-app.post('/api/spin/unlock', (req, res) => {
+function isBlankField(value) {
+  return !value || !String(value).trim();
+}
+
+function orderHasFullContact(order) {
+  return (
+    !!order &&
+    !isBlankField(order.customer_name) &&
+    !isBlankField(order.phone) &&
+    !isBlankField(order.address)
+  );
+}
+
+const CONTACT_INCOMPLETE_MSG =
+  'အော်ဒါတွင် အမည်၊ ဖုန်းနှင့် လိပ်စာ ပြည့်စုံရမည် — ဆက်သွယ်ရန် အချက်အလက် ဖြည့်ပါ';
+
+function rejectIfIncompleteContact(order, res) {
+  if (orderHasFullContact(order)) return false;
+  res.status(400).json({
+    error: CONTACT_INCOMPLETE_MSG,
+    code: 'missing_contact',
+  });
+  return true;
+}
+
+function spinRequestOrderPhone(req) {
+  const src = req.method === 'GET' ? req.query || {} : req.body || {};
+  return {
+    orderId: src.orderId || src.order_id || '',
+    phone: src.phone || '',
+  };
+}
+
+function spinUnlockHandler(req, res) {
   try {
-    const orderId = (req.body && (req.body.orderId || req.body.order_id)) || '';
-    const phone = (req.body && req.body.phone) || '';
+    const { orderId, phone } = spinRequestOrderPhone(req);
     const order = findOrderForSpin(orderId, phone);
     if (!order) {
       return res.status(404).json({ error: 'အော်ဒါ မတွေ့ပါ — အော်ဒါနံပါတ်နှင့် ဖုန်း စစ်ပါ' });
     }
+    if (rejectIfIncompleteContact(order, res)) return;
     const credits = Number(order.spin_credits) || 0;
     res.json({
       ok: true,
@@ -779,7 +833,11 @@ app.post('/api/spin/unlock', (req, res) => {
     console.error(e);
     res.status(500).json({ error: 'Server error' });
   }
-});
+}
+
+app.get('/api/spin/credits', spinUnlockHandler);
+app.get('/api/spin/unlock', spinUnlockHandler);
+app.post('/api/spin/unlock', spinUnlockHandler);
 
 app.post('/api/spin', (req, res) => {
   try {
@@ -789,6 +847,7 @@ app.post('/api/spin', (req, res) => {
     if (!order) {
       return res.status(404).json({ error: 'အော်ဒါ မတွေ့ပါ — အော်ဒါနံပါတ်နှင့် ဖုန်း စစ်ပါ' });
     }
+    if (rejectIfIncompleteContact(order, res)) return;
     const credits = Number(order.spin_credits) || 0;
     if (credits < 1) {
       return res.status(403).json({
@@ -1101,6 +1160,50 @@ app.delete('/api/admin/orders/:orderId', requireAdmin, (req, res) => {
 
 // ========== ADMIN SPIN PRIZES ==========
 
+app.get('/api/admin/spin-plays', requireAdmin, (_req, res) => {
+  try {
+    const rows = db
+      .prepare(
+        `SELECT
+           sp.id,
+           sp.order_id,
+           sp.prize_id,
+           sp.prize_name,
+           sp.created_at,
+           o.customer_name,
+           o.phone,
+           o.address,
+           o.spin_credits,
+           COALESCE(spr.product_id, NULL) AS product_id,
+           p.name AS product_name
+         FROM spin_plays sp
+         LEFT JOIN orders o ON o.order_id = sp.order_id
+         LEFT JOIN spin_prizes spr ON spr.id = sp.prize_id
+         LEFT JOIN products p ON p.id = spr.product_id
+         ORDER BY datetime(sp.created_at) DESC, sp.id DESC`
+      )
+      .all();
+    res.json(
+      rows.map((r) => ({
+        id: r.id,
+        created_at: r.created_at,
+        prize_id: r.prize_id,
+        prize_name: r.prize_name,
+        product_id: r.product_id || null,
+        product_name: r.product_name || null,
+        order_id: r.order_id,
+        customer_name: r.customer_name || '',
+        phone: r.phone || '',
+        address: r.address || '',
+        spin_credits: Number(r.spin_credits) || 0,
+      }))
+    );
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.get('/api/admin/spin-prizes', requireAdmin, (_req, res) => {
   try {
     const prizes = db
@@ -1400,6 +1503,7 @@ async function start() {
   createTables(db);
   migrateProductsColumns(db);
   migrateOrdersSpinCredits(db);
+  migrateSpinPlaysColumns(db);
   seedIfEmpty(db);
   ensureDefaultSettings(db);
 

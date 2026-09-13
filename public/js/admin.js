@@ -67,6 +67,7 @@
     $('#dashView').classList.remove('hidden');
     loadProducts();
     loadSpinPrizes().catch(() => {});
+    loadSpinWins().catch(() => {});
     loadOrders();
     loadSettings();
   }
@@ -368,6 +369,7 @@
       }
       closePasswordConfirm();
       loadOrders();
+      loadSpinWins().catch(() => {});
     } catch (err) {
       $('#passwordConfirmError').textContent = err.message || 'ဖျက်မရပါ';
       if (err.status === 403) {
@@ -501,6 +503,7 @@
         });
         toast('အခြေအနေ ပြောင်းပြီး');
         loadOrders();
+        loadSpinWins().catch(() => {});
         openOrder(o.order_id);
       } catch (err) {
         toast(err.message);
@@ -516,6 +519,7 @@
         });
         toast('ကံစမ်းခွင့် သိမ်းပြီး');
         loadOrders();
+        loadSpinWins().catch(() => {});
         openOrder(o.order_id);
       } catch (err) {
         toast(err.message);
@@ -737,6 +741,34 @@
         })
         .join('') || '<tr><td colspan="6" class="empty">ဆု မရှိသေးပါ — စတိုးတွင် စပင်ဘီး ပုန်းနေမည်</td></tr>';
     return prizes;
+  }
+
+  async function loadSpinWins() {
+    const tbody = $('#spinWinsTable tbody');
+    if (!tbody) return [];
+    const rows = await api('/api/admin/spin-plays');
+    loadSpinWins._cache = rows;
+    tbody.innerHTML =
+      rows
+        .map((r) => {
+          const prod = r.product_name
+            ? escapeHtml(r.product_name)
+            : '<span class="hint">—</span>';
+          return `
+      <tr>
+        <td><span class="hint">${escapeHtml(r.created_at || '')}</span></td>
+        <td><strong>${escapeHtml(r.prize_name || '')}</strong></td>
+        <td>${prod}</td>
+        <td><code>${escapeHtml(r.order_id || '')}</code></td>
+        <td>${escapeHtml(r.customer_name || '')}</td>
+        <td>${escapeHtml(r.phone || '')}</td>
+        <td class="cell-address">${escapeHtml(r.address || '')}</td>
+        <td>${Number(r.spin_credits) || 0}</td>
+      </tr>`;
+        })
+        .join('') ||
+      '<tr><td colspan="8" class="empty">အနိုင်ရရှိမှု မရှိသေးပါ</td></tr>';
+    return rows;
   }
 
   async function fillSpinProductOptions(selectedId) {

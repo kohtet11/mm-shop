@@ -554,10 +554,19 @@
     btn.disabled = true;
     btn.textContent = 'တင်နေသည်…';
 
+    const nameVal = $('#customerName').value.trim();
+    const phoneVal = $('#phone').value.trim();
+    const addressVal = $('#address').value.trim();
+    if (!nameVal || !phoneVal || !addressVal) {
+      toast('အမည်၊ ဖုန်းနှင့် လိပ်စာ လိုအပ်သည်');
+      btn.disabled = false;
+      btn.textContent = 'အော်ဒါ အတည်ပြုမည်';
+      return;
+    }
     const fd = new FormData();
-    fd.append('customer_name', $('#customerName').value.trim());
-    fd.append('phone', $('#phone').value.trim());
-    fd.append('address', $('#address').value.trim());
+    fd.append('customer_name', nameVal);
+    fd.append('phone', phoneVal);
+    fd.append('address', addressVal);
     fd.append('notes', $('#notes').value.trim());
     fd.append(
       'items',
@@ -577,7 +586,6 @@
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'မအောင်မြင်ပါ');
       $('#successOrderId').textContent = data.order_id;
-      const phoneVal = $('#phone').value.trim();
       rememberOrder(data.order_id, phoneVal);
       const trackLink = $('#trackOrderLink');
       if (trackLink) {
@@ -808,7 +816,15 @@
         body: JSON.stringify({ orderId, phone }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'မတွေ့ပါ');
+      if (!res.ok) {
+        if (data.code === 'missing_contact' || res.status === 400) {
+          throw new Error(
+            data.error ||
+              'အော်ဒါ ဆက်သွယ်ရန် အချက်အလက် (အမည် / ဖုန်း / လိပ်စာ) မပြည့်စုံပါ — ငွေချေသည့်အခါ ဖြည့်ထားသော အချက်အလက် လိုအပ်သည်'
+          );
+        }
+        throw new Error(data.error || 'မတွေ့ပါ');
+      }
       spinUnlockedOrderId = data.orderId || orderId;
       spinUnlockedPhone = phone;
       spinCredits = Number(data.spinCredits) || 0;
@@ -855,6 +871,12 @@
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (typeof data.spinCredits === 'number') spinCredits = data.spinCredits;
+        if (data.code === 'missing_contact') {
+          throw new Error(
+            data.error ||
+              'အော်ဒါ ဆက်သွယ်ရန် အချက်အလက် (အမည် / ဖုန်း / လိပ်စာ) မပြည့်စုံပါ — ငွေချေသည့်အခါ ဖြည့်ထားသော အချက်အလက် လိုအပ်သည်'
+          );
+        }
         throw new Error(data.error || 'လှည့်မရပါ');
       }
       if (typeof data.spinCredits === 'number') spinCredits = data.spinCredits;
