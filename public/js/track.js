@@ -89,6 +89,33 @@
         : 'မရရှိသေး';
       $('#resultTotal').textContent = formatMMK(data.total_mmk);
 
+      const spinBox = $('#resultSpinBox');
+      const spinStatus = $('#resultSpinStatus');
+      if (spinBox && spinStatus) {
+        const isSpin = !!(data.is_spin_order || Number(data.spin_completed) === 1 || data.spin_locked || Number(data.spin_credits) > 0 || data.spin_expired);
+        if (isSpin) {
+          spinBox.classList.remove('hidden');
+          if (Number(data.spin_completed) === 1) {
+            spinStatus.innerHTML = '<span class="badge spin-completed">ပြီးဆုံး</span>';
+          } else if (data.spin_expired) {
+            spinStatus.innerHTML =
+              '<span class="badge spin-expired">သက်တမ်းကုန်ဆုံး</span>' +
+              ' <span class="hint">ကျန်အခွင့်: ' +
+              escapeHtml(Number(data.spin_credits) || 0) +
+              '</span>';
+          } else {
+            spinStatus.innerHTML =
+              '<span class="badge pending">ကံစမ်းခွင့်</span> ' +
+              '<span class="hint">ကျန်: ' +
+              escapeHtml(Number(data.spin_credits) || 0) +
+              '</span>';
+          }
+        } else {
+          spinBox.classList.add('hidden');
+          spinStatus.textContent = '';
+        }
+      }
+
       const items = Array.isArray(data.items) ? data.items : [];
       if (!items.length) {
         $('#resultItems').innerHTML = '<div class="empty">ပစ္စည်း မရှိပါ</div>';

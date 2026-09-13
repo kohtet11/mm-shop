@@ -14,6 +14,7 @@
   let spinCredits = 0;
   let spinExpired = false;
   let spinLocked = false;
+  let spinCompleted = false;
   let spinUnlockedOrderId = '';
   const SPIN_COLORS = [
     '#7c3aed', '#a855f7', '#c026d3', '#db2777',
@@ -398,6 +399,7 @@
         name: p.name,
         price_mmk: p.price_mmk,
         image_path: p.image_path,
+        is_spin_credit: productIsSpinCredit(p) ? 1 : 0,
         quantity: 1,
       });
     }
@@ -428,6 +430,41 @@
 
   function cartTotal() {
     return cart.reduce((s, i) => s + i.price_mmk * i.quantity, 0);
+  }
+
+  function productIsSpinCredit(p) {
+    return !!(p && Number(p.is_spin_credit) === 1);
+  }
+
+  function cartItemIsSpinCredit(item) {
+    if (!item) return false;
+    if (item.is_spin_credit != null) return Number(item.is_spin_credit) === 1;
+    const p = products.find((x) => x.id === item.product_id);
+    return productIsSpinCredit(p);
+  }
+
+  function cartIsSpinOnly() {
+    return cart.length > 0 && cart.every(cartItemIsSpinCredit);
+  }
+
+  function syncCheckoutAddressFields() {
+    const spinOnly = cartIsSpinOnly();
+    const group = $('#addressGroup');
+    const addr = $('#address');
+    const mark = $('#addressRequiredMark');
+    const hint = $('#spinCheckoutHint');
+    if (addr) {
+      addr.required = !spinOnly;
+      if (spinOnly) addr.removeAttribute('required');
+      else addr.setAttribute('required', 'required');
+    }
+    if (mark) mark.classList.toggle('hidden', spinOnly);
+    if (hint) hint.classList.toggle('hidden', !spinOnly);
+    if (group) group.classList.toggle('spin-optional', spinOnly);
+    const label = group && group.querySelector('label');
+    if (label && mark) {
+      // keep label text; required mark handles *
+    }
   }
 
   function renderCart() {
@@ -562,6 +599,7 @@
     $('#checkoutFormView').classList.remove('hidden');
     $('#checkoutSuccess').classList.add('hidden');
     $('#checkoutTotal').textContent = formatMMK(cartTotal());
+    syncCheckoutAddressFields();
     openOverlay('checkoutOverlay');
   });
 
@@ -584,13 +622,21 @@
 
     const nameVal = $('#customerName').value.trim();
     const phoneVal = $('#phone').value.trim();
-    const addressVal = $('#address').value.trim();
-    if (!nameVal || !phoneVal || !addressVal) {
+    const spinOnly = cartIsSpinOnly();
+    let addressVal = $('#address').value.trim();
+    if (!nameVal || !phoneVal) {
+      toast('အမည်နှင့် ဖုန်း လိုအပ်သည်');
+      btn.disabled = false;
+      btn.textContent = 'အော်ဒါ အတည်ပြုမည်';
+      return;
+    }
+    if (!spinOnly && !addressVal) {
       toast('အမည်၊ ဖုန်းနှင့် လိပ်စာ လိုအပ်သည်');
       btn.disabled = false;
       btn.textContent = 'အော်ဒါ အတည်ပြုမည်';
       return;
     }
+    if (spinOnly && !addressVal) addressVal = '—';
     const fd = new FormData();
     fd.append('customer_name', nameVal);
     fd.append('phone', phoneVal);
@@ -695,6 +741,8 @@
     else if (typeof data.spinCredits === 'number') spinCredits = data.spinCredits;
     if (typeof data.expired === 'boolean') spinExpired = data.expired;
     if (typeof data.locked === 'boolean') spinLocked = data.locked;
+    if (typeof data.spinCompleted === 'boolean') spinCompleted = data.spinCompleted;
+    else if (data.spin_completed != null) spinCompleted = Number(data.spin_completed) === 1;
   }
 
   function updateSpinButton() {
@@ -703,16 +751,22 @@
     if (!btn) return;
     const n = Math.max(0, Number(spinCredits) || 0);
     const expired = !!spinExpired && !!spinUnlockedOrderId;
-    btn.textContent = expired ? 'သက်တမ်းကုန်ဆုံး' : 'ကံစမ်းမည် (' + n + ')';
-    const canSpin = n >= 1 && !spinBusy && !!spinUnlockedOrderId && !expired;
+    const completed = !!spinCompleted && !!spinUnlockedOrderId;
+    if (completed) btn.textContent = 'ပြီးဆုံး';
+    else if (expired) btn.textContent = 'သက်တမ်းကုန်ဆုံး';
+    else btn.textContent = 'ကံစမ်းမည် (' + n + ')';
+    const canSpin = n >= 1 && !spinBusy && !!spinUnlockedOrderId && !expired && !completed;
     btn.disabled = !canSpin;
     btn.classList.toggle('ready', canSpin);
     btn.classList.toggle('dimmed', !canSpin);
-    btn.classList.toggle('spin-expired', expired);
+    btn.classList.toggle('spin-expired', expired && !completed);
+    btn.classList.toggle('spin-completed', completed);
     if (hint) {
       if (spinBusy) hint.textContent = 'လှည့်နေသည်…';
       else if (!spinUnlockedOrderId) {
         hint.textContent = 'အော်ဒါနံပါတ် ထည့်ပြီး ကံစမ်းခွင့် စစ်ပါ';
+      } else if (completed) {
+        hint.textContent = 'ပြီးဆုံး — ဆုရရှိမှု ကိုင်တွယ်ပြီးပါပြီ';
       } else if (expired) {
         hint.textContent = 'သက်တမ်းကုန်ဆုံး — ကံစမ်းခွင့် အားလုံး အသုံးပြုပြီးပါပြီ';
       } else if (n < 1) {
@@ -865,7 +919,10 @@
       applySpinStateFromApi(data);
       saveSpinSession();
       if (msg) {
-        if (spinExpired) {
+        if (spinCompleted) {
+          msg.textContent = 'ပြီးဆုံး — ဆုရရှိမှု ကိုင်တွယ်ပြီးပါပြီ';
+          msg.classList.add('ok');
+        } else if (spinExpired) {
           msg.textContent = 'သက်တမ်းကုန်ဆုံး — ကံစမ်းခွင့် အားလုံး အသုံးပြုပြီးပါပြီ';
           msg.classList.remove('ok');
         } else if (spinCredits >= 1) {
@@ -883,6 +940,7 @@
       spinCredits = 0;
       spinExpired = false;
       spinLocked = false;
+      spinCompleted = false;
       spinUnlockedOrderId = '';
       saveSpinSession();
       if (msg) {

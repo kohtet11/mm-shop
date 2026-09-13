@@ -183,6 +183,8 @@
     $('#pDesc').value = product ? product.description || '' : '';
     $('#pActive').checked = product ? !!product.active : true;
     $('#pOnBanner').checked = product ? !!product.on_banner : false;
+    const pSpinCredit = $('#pSpinCredit');
+    if (pSpinCredit) pSpinCredit.checked = product ? !!Number(product.is_spin_credit) : false;
     const pct = product ? String(Number(product.discount_percent) || 0) : '0';
     const discSel = $('#pDiscount');
     if (discSel) {
@@ -226,6 +228,7 @@
     fd.append('name', $('#pName').value.trim());
     fd.append('price_mmk', $('#pPrice').value);
     fd.append('stock', $('#pStock') ? $('#pStock').value : '99');
+    fd.append('is_spin_credit', $('#pSpinCredit') && $('#pSpinCredit').checked ? '1' : '0');
     fd.append('description', $('#pDesc').value);
     fd.append('active', $('#pActive').checked ? '1' : '0');
     fd.append('on_banner', $('#pOnBanner').checked ? '1' : '0');
@@ -431,11 +434,13 @@
           <strong>${escapeHtml(o.order_id)}</strong>
           <div class="hint">${escapeHtml(o.created_at || '')}</div>
           <div class="hint">ဘီးအခွင့်: ${Number(o.spin_credits) || 0}${
-            o.spin_expired
-              ? ' <span class="badge spin-expired">သက်တမ်းကုန်ဆုံး</span>'
-              : o.spin_locked || o.spin_credits_locked
-                ? ' <span class="badge spin-locked">သော့ခတ်</span>'
-                : ''
+            Number(o.spin_completed) === 1
+              ? ' <span class="badge spin-completed">ပြီးဆုံး</span>'
+              : o.spin_expired
+                ? ' <span class="badge spin-expired">သက်တမ်းကုန်ဆုံး</span>'
+                : o.spin_locked || o.spin_credits_locked
+                  ? ' <span class="badge spin-locked">သော့ခတ်</span>'
+                  : ''
           }</div>
         </td>
         <td>
@@ -515,6 +520,17 @@
             : 'စလစ်/ငွေပေးချေမှုအရ အခွင့် အရေအတွက် သတ်မှတ်ပါ (ဥပမာ ၁ ကြိမ် = 1) — တစ်ကြိမ်သာ သတ်မှတ်နိုင်သည်'
         }</div>
       </div>
+      ${
+        o.is_spin_order || Number(o.spin_completed) === 1 || Number(o.spin_credits) > 0 || o.spin_locked || (o.spin_plays && o.spin_plays.length)
+          ? `<p><strong>စပင် အခြေအနေ:</strong> ${
+              Number(o.spin_completed) === 1
+                ? '<span class="badge spin-completed">ပြီးဆုံး</span>'
+                : o.spin_expired
+                  ? '<span class="badge spin-expired">သက်တမ်းကုန်ဆုံး</span>'
+                  : '<span class="badge pending">ဆက်လက်ကိုင်တွယ်ဆဲ</span>'
+            }</p>`
+          : ''
+      }
       <div class="row-actions" style="gap:0.5rem;flex-wrap:wrap;margin-bottom:0.75rem">
         <button type="button" class="btn btn-primary btn-sm" id="saveStatusBtn" data-oid="${escapeHtml(
         o.order_id
@@ -524,6 +540,15 @@
         }" id="saveSpinCreditsBtn" data-oid="${escapeHtml(
         o.order_id
       )}" ${o.spin_locked || o.spin_credits_locked ? 'disabled' : ''}>ကံစမ်းခွင့် သိမ်းမည်</button>
+        ${
+          o.is_spin_order || Number(o.spin_completed) === 1 || Number(o.spin_credits) > 0 || o.spin_locked || (o.spin_plays && o.spin_plays.length)
+            ? `<button type="button" class="btn btn-sm${
+                Number(o.spin_completed) === 1 ? ' btn-outline dimmed' : ' btn-primary'
+              }" id="markSpinCompletedBtn" data-oid="${escapeHtml(o.order_id)}" ${
+                Number(o.spin_completed) === 1 ? 'disabled' : ''
+              }>ပြီးဆုံး</button>`
+            : ''
+        }
         <button type="button" class="btn btn-danger btn-sm" id="deleteOrderBtn" data-oid="${escapeHtml(
         o.order_id
       )}">ဖျက်မည်</button>
@@ -579,6 +604,25 @@
             body: JSON.stringify({ spin_credits: credits }),
           });
           toast('ကံစမ်းခွင့် သိမ်းပြီး');
+          loadOrders();
+          loadSpinWins().catch(() => {});
+          openOrder(o.order_id);
+        } catch (err) {
+          toast(err.message);
+        }
+      };
+    }
+
+    const markDoneBtn = $('#markSpinCompletedBtn');
+    if (markDoneBtn) {
+      markDoneBtn.onclick = async () => {
+        if (Number(o.spin_completed) === 1 || markDoneBtn.disabled) return;
+        try {
+          await api('/api/admin/orders/' + encodeURIComponent(o.order_id) + '/spin-completed', {
+            method: 'PATCH',
+            body: JSON.stringify({ spin_completed: 1 }),
+          });
+          toast('ပြီးဆုံး အဖြစ် သိမ်းပြီး');
           loadOrders();
           loadSpinWins().catch(() => {});
           openOrder(o.order_id);
