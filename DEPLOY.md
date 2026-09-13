@@ -31,7 +31,7 @@ Blueprint uses **Starter** (~$7/mo) + a **1GB disk** (~$0.25/GB-mo) so the servi
 - A **payment method** is required on Render for Starter + disks.
 - After you push these changes: **sync the Blueprint**, **or** manually set **Instance Type → Starter**,
   **Add Disk** mount `/var/data` size **1GB**, env **`DATA_ROOT=/var/data`**, then **redeploy**.
-- Seed products still appear automatically if the DB is empty on boot.
+- Built-in sample catalog (Skullpanda, Nommi, Zootopia + spin prizes + a buy-spin-chance product) is re-seeded on boot if missing; images ship in git under `public/assets/samples/`.
 
 ### After first login
 
@@ -66,7 +66,7 @@ Blueprint သည် **Starter** (~$7/mo) + **1GB disk** (~$0.25/GB-mo) သုံ
 - Render တွင် **payment method** လိုအပ်သည်။
 - Push ပြီးနောက်: Blueprint **sync** လုပ်ပါ၊ သို့မဟုတ် ကိုယ်တိုင် **Instance Type → Starter**,
   **Add Disk** mount `/var/data` size **1GB**, env **`DATA_ROOT=/var/data`** သတ်မှတ်ပြီး **redeploy**။
-- DB ဗလာဖြစ်ပါက seed ပစ္စည်းများ boot တွင် အလိုအလျောက် ပြန်ထည့်သည်။
+- DB ဗလာ/wipe ဖြစ်ပါက built-in sample ပစ္စည်း ၃ ခု၊ spin prizes၊ နှင့် စပင်ဘီး ကံစမ်းခွင့် ပစ္စည်း boot တွင် ပြန်ထည့်သည် (ပုံများ `public/assets/samples/`).
 
 ### ပထမဝင်ပြီးနောက်
 

@@ -59,6 +59,7 @@ cp .env.example .env
 - **အော်ဒါတစ်ခုချင်း** ၁၅ကြိမ် စက်ဝန်း — ၁၅၊ ၃၀၊ ၄၅… ကြိမ်မြောက်သည် admin မှ special မှတ်ထားသော ဆုများမှသာ ရွေးသည်
 - အခြားကြိမ်များသည် ပုံမှန်ဆုများမှသာ (pool အတွင်း uniform random; `hit_every` ကို ဤမုဒ်တွင် မသုံး)
 - Admin → စပင်ဘီး → 「၁၅ကြိမ်တွင် ၁ကြိမ်」 နှိပ်၍ special ဖွင့်/ပိတ်
+- Built-in product **စပင်ဘီး ကံစမ်းခွင့် (၁ ကြိမ်)** — ဝယ်ပြီး စလစ်တင်ပါ၊ Admin က ကံစမ်းခွင့် ထည့်ပေးသည် (no pre-granted demo order)
 
 ## ဖောက်သည် ချတ် (polling MVP)
 
@@ -82,7 +83,7 @@ mm-shop/
 
 See **[DEPLOY.md](DEPLOY.md)**. Blueprint default: **Starter** (~$7/mo) + **1GB disk** (~$0.25/GB-mo),
 always-on, data under `/var/data` via `DATA_ROOT`. Needs a payment method on Render. After push,
-sync Blueprint or manually set Starter + disk mount `/var/data` + `DATA_ROOT=/var/data`, then redeploy.
+sync Blueprint or manually set Starter + disk mount `/var/data` + `DATA_ROOT=/var/data`, then redeploy. Built-in sample catalog (3 products + spin prizes, images in `public/assets/samples/`) comes back when the DB is empty/wiped; real product uploads still need that disk.
 
 ## API အကျဉ်း
 
@@ -93,5 +94,5 @@ sync Blueprint or manually set Starter + disk mount `/var/data` + `DATA_ROOT=/va
 ## မှတ်ချက်
 
 - `better-sqlite3` native build မအောင်မြင်ပါက `sql.js` ကို fallback အဖြစ် ထည့်သွင်းနိုင်သည် (`npm install sql.js`)
-- Seed ပစ္စည်း ၃ ခု (Skullpanda, Nommi, Zootopia) ပထမအကြိမ် စတင်ချိန်တွင် အလိုအလျောက် ထည့်သည်
+- Samples are built-in (Skullpanda, Nommi, Zootopia + spin prizes + a buy-spin-chance product) and re-seeded on startup if missing; real products still need a persistent disk (`DATA_ROOT`) to survive sleep/redeploy.
 - `DATA_ROOT` သတ်မှတ်ပါက `data/` နှင့် `uploads/` သည် ထိုလမ်းကြောင်းအောက်တွင် ရှိသည် (Render disk: `/var/data`)

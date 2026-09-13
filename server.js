@@ -340,86 +340,144 @@ function parseOnBanner(value, fallback = 0) {
   return value === '0' || value === 0 || value === false || value === 'false' ? 0 : 1;
 }
 
-function seedIfEmpty(database) {
-  const count = database.prepare('SELECT COUNT(*) AS c FROM products').get().c;
-  if (count > 0) return;
+const SAMPLE_ASSET_DIR = '/assets/samples';
 
-  const placeholders = [
-    {
-      name: 'Skullpanda Blind Box',
-      price: 45000,
-      desc: 'လှပသော Skullpanda ဘလိုင်ဘောက်စ် — ကျပန်း ဒီဇိုင်း ရရှိမည်။',
-      color: '#14b8a6',
-      file: 'skullpanda.svg',
-    },
-    {
-      name: 'Nommi Mini Figure',
-      price: 38000,
-      desc: 'Nommi မီနီ ရုပ်ပုံ — စုဆောင်းသူများအတွက် အထူး။',
-      color: '#ec4899',
-      file: 'nommi.svg',
-    },
-    {
-      name: 'Zootopia Collectible',
-      price: 52000,
-      desc: 'Zootopia စုဆောင်းပစ္စည်း — အရည်အသွေးမြင့် ပလပ်စတစ်။',
-      color: '#8b5cf6',
-      file: 'zootopia.svg',
-    },
+const BUILTIN_SAMPLES = [
+  {
+    slug: 'skullpanda',
+    name: 'Skullpanda Blind Box',
+    price: 45000,
+    desc: 'လှပသော Skullpanda ဘလိုင်ဘောက်စ် — ကျပန်း ဒီဇိုင်း ရရှိမည်။',
+    image_path: SAMPLE_ASSET_DIR + '/skullpanda.svg',
+    on_banner: 1,
+    discount_percent: 15,
+    prize_name: 'Skullpanda Blind Box',
+    is_special: 1,
+    prize_sort: 1,
+  },
+  {
+    slug: 'nommi',
+    name: 'Nommi Mini Figure',
+    price: 38000,
+    desc: 'Nommi မီနီ ရုပ်ပုံ — စုဆောင်းသူများအတွက် အထူး။',
+    image_path: SAMPLE_ASSET_DIR + '/nommi.svg',
+    on_banner: 0,
+    discount_percent: 0,
+    prize_name: 'Nommi Mini Figure',
+    is_special: 0,
+    prize_sort: 2,
+  },
+  {
+    slug: 'zootopia',
+    name: 'Zootopia Collectible',
+    price: 52000,
+    desc: 'Zootopia စုဆောင်းပစ္စည်း — အရည်အသွေးမြင့် ပလပ်စတစ်။',
+    image_path: SAMPLE_ASSET_DIR + '/zootopia.svg',
+    on_banner: 0,
+    discount_percent: 0,
+    prize_name: 'Zootopia Collectible',
+    is_special: 0,
+    prize_sort: 3,
+  },
+  {
+    slug: 'spin-chance',
+    name: 'စပင်ဘီး ကံစမ်းခွင့် (၁ ကြိမ်)',
+    price: 5000,
+    desc: 'ငွေလွှဲပြီး စလစ်ပုံတင်ကာ အော်ဒါတင်ပါ။ Admin က အတည်ပြုပြီးနောက် ကံစမ်းခွင့် (၁ ကြိမ်) ထည့်ပေးမည်။',
+    image_path: SAMPLE_ASSET_DIR + '/spin-chance.svg',
+    on_banner: 0,
+    discount_percent: 0,
+  },
+];
+
+function sampleLegacyImagePaths(sample) {
+  const file = sample.slug + '.svg';
+  return [
+    'products/' + file,
+    '/uploads/products/' + file,
+    'uploads/products/' + file,
   ];
+}
 
-  const insert = database.prepare(
+function isSampleImagePath(current, sample) {
+  const p = String(current || '').trim();
+  if (!p) return true;
+  if (p === sample.image_path) return true;
+  return sampleLegacyImagePaths(sample).includes(p);
+}
+
+/**
+ * Idempotent built-in catalog. Ensures the 3 demo products + linked spin
+ * prizes + a buy-spin-chance product exist after an empty/wiped DB
+ * (e.g. free Render). Never deletes admin-added rows or orders.
+ * Admin may still edit or delete samples.
+ */
+function seedBuiltins(database) {
+  const findProductByName = database.prepare('SELECT * FROM products WHERE name = ?');
+  const insertProduct = database.prepare(
     `INSERT INTO products (name, price_mmk, description, image_path, active, on_banner, discount_percent)
      VALUES (?, ?, ?, ?, 1, ?, ?)`
   );
-
-  placeholders.forEach((p, idx) => {
-    const svgPath = path.join(PRODUCTS_DIR, p.file);
-    if (!fs.existsSync(svgPath)) {
-      fs.writeFileSync(
-        svgPath,
-        makeProductSvg(p.name, p.color),
-        'utf8'
-      );
-    }
-    // Demo: first sample product on banner with 15% OFF
-    const onBanner = idx === 0 ? 1 : 0;
-    const discount = idx === 0 ? 15 : 0;
-    insert.run(p.name, p.price, p.desc, `products/${p.file}`, onBanner, discount);
-  });
-
-  const settingsDefaults = [
-    ['bank_name', 'KBZ Bank'],
-    ['account_number', '1234567890'],
-    ['account_name', 'MM Shop Myanmar'],
-    ['payment_note', 'ငွေလွှဲပြီးနောက် စလစ်ပုံတင်ပြီး အော်ဒါတင်ပါ။'],
-    ['shop_name', 'MM Shop'],
-  ];
-  const setIns = database.prepare(
-    'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)'
+  const updateProductImage = database.prepare(
+    `UPDATE products SET image_path = ?, updated_at = datetime('now') WHERE id = ?`
   );
-  for (const [k, v] of settingsDefaults) {
-    setIns.run(k, v);
+  const findPrizeByProduct = database.prepare(
+    'SELECT * FROM spin_prizes WHERE product_id = ? LIMIT 1'
+  );
+  const findPrizeByName = database.prepare(
+    'SELECT * FROM spin_prizes WHERE name = ? LIMIT 1'
+  );
+  const insertPrize = database.prepare(
+    `INSERT INTO spin_prizes (name, product_id, hit_every, is_special, active, sort_order)
+     VALUES (?, ?, 1, ?, 1, ?)`
+  );
+  const linkPrizeProduct = database.prepare(
+    'UPDATE spin_prizes SET product_id = ? WHERE id = ?'
+  );
+
+  const productIds = {};
+  let addedProducts = 0;
+  let fixedImages = 0;
+  let addedPrizes = 0;
+
+  for (const sample of BUILTIN_SAMPLES) {
+    let row = findProductByName.get(sample.name);
+    if (!row) {
+      const result = insertProduct.run(
+        sample.name,
+        sample.price,
+        sample.desc,
+        sample.image_path,
+        sample.on_banner,
+        sample.discount_percent
+      );
+      row = { id: result.lastInsertRowid, image_path: sample.image_path };
+      addedProducts += 1;
+    } else if (isSampleImagePath(row.image_path, sample) && String(row.image_path || '') !== sample.image_path) {
+      updateProductImage.run(sample.image_path, row.id);
+      fixedImages += 1;
+    }
+    productIds[sample.slug] = row.id;
   }
 
-  console.log('Seeded 3 sample products and default payment settings.');
-}
+  for (const sample of BUILTIN_SAMPLES) {
+    if (!sample.prize_name) continue;
+    const pid = productIds[sample.slug];
+    let prize = findPrizeByProduct.get(pid);
+    if (!prize) prize = findPrizeByName.get(sample.prize_name);
+    if (!prize) {
+      insertPrize.run(sample.prize_name, pid, sample.is_special, sample.prize_sort);
+      addedPrizes += 1;
+    } else if ((prize.product_id == null || prize.product_id === '') && pid) {
+      linkPrizeProduct.run(pid, prize.id);
+    }
+  }
 
-function makeProductSvg(label, color) {
-  const safe = String(label).replace(/[<>&]/g, '');
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
-  <defs>
-    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:${color};stop-opacity:1"/>
-      <stop offset="100%" style="stop-color:#0f172a;stop-opacity:1"/>
-    </linearGradient>
-  </defs>
-  <rect width="400" height="400" fill="url(#g)"/>
-  <circle cx="200" cy="160" r="70" fill="rgba(255,255,255,0.25)"/>
-  <rect x="100" y="250" width="200" height="80" rx="16" fill="rgba(255,255,255,0.2)"/>
-  <text x="200" y="300" text-anchor="middle" font-family="system-ui,sans-serif" font-size="22" fill="#fff" font-weight="600">${safe}</text>
-</svg>`;
+  if (addedProducts || addedPrizes || fixedImages) {
+    console.log(
+      `Built-in samples: +${addedProducts} products, +${addedPrizes} prizes, ${fixedImages} image path(s) updated.`
+    );
+  }
 }
 
 // --- Async sql.js fallback ---
@@ -1394,6 +1452,8 @@ app.delete('/api/admin/products/:id', requireAdmin, (req, res) => {
   const id = parseInt(req.params.id, 10);
   const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
+  // Keep admin delete working when a spin prize is linked (samples included).
+  db.prepare('UPDATE spin_prizes SET product_id = NULL WHERE product_id = ?').run(id);
   db.prepare('DELETE FROM products WHERE id = ?').run(id);
   res.json({ ok: true });
 });
@@ -1994,7 +2054,7 @@ async function start() {
   migrateSpinPlaysColumns(db);
   migrateSpinPrizesSpecial(db);
   migrateOrdersSpinCreditsLockBackfill(db);
-  seedIfEmpty(db);
+  seedBuiltins(db);
   ensureDefaultSettings(db);
 
   app.listen(PORT, '0.0.0.0', () => {
