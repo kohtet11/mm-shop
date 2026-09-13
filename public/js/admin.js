@@ -120,6 +120,7 @@
           if (p.on_banner) bannerBits.push('<span class="badge paid_confirmed">Banner</span>');
           if (pct > 0) bannerBits.push('<span class="badge pending">' + pct + '% OFF</span>');
           const bannerCell = bannerBits.length ? bannerBits.join(' ') : '<span class="hint">—</span>';
+          const stock = Number.isFinite(Number(p.stock)) ? Number(p.stock) : 0;
           return `
       <tr>
         <td>${p.image_path ? `<img class="thumb-sm" src="${imgUrl(p.image_path)}" alt="" />` : '—'}</td>
@@ -128,6 +129,13 @@
           <div class="hint">${escapeHtml((p.description || '').slice(0, 80))}</div>
         </td>
         <td>${formatMMK(p.price_mmk)}</td>
+        <td>
+          <div class="stock-adjust">
+            <button type="button" class="btn btn-sm btn-outline" data-stock-delta="${p.id}" data-delta="-1" title="လျှော့">−</button>
+            <span class="stock-val${stock <= 0 ? ' out' : ''}">${stock}</span>
+            <button type="button" class="btn btn-sm btn-outline" data-stock-delta="${p.id}" data-delta="1" title="တိုး">+</button>
+          </div>
+        </td>
         <td>${bannerCell}</td>
         <td>${p.active ? '<span class="badge paid_confirmed">active</span>' : '<span class="badge cancelled">inactive</span>'}</td>
         <td class="row-actions">
@@ -137,7 +145,7 @@
       </tr>`;
         }
       )
-      .join('') || '<tr><td colspan="6" class="empty">ပစ္စည်း မရှိသေးပါ</td></tr>';
+      .join('') || '<tr><td colspan="7" class="empty">ပစ္စည်း မရှိသေးပါ</td></tr>';
 
     loadProducts._cache = products;
   }
@@ -169,6 +177,9 @@
     $('#productId').value = product ? product.id : '';
     $('#pName').value = product ? product.name : '';
     $('#pPrice').value = product ? product.price_mmk : '';
+    $('#pStock').value = product
+      ? String(Number.isFinite(Number(product.stock)) ? Number(product.stock) : 0)
+      : '99';
     $('#pDesc').value = product ? product.description || '' : '';
     $('#pActive').checked = product ? !!product.active : true;
     $('#pOnBanner').checked = product ? !!product.on_banner : false;
@@ -214,6 +225,7 @@
     const fd = new FormData();
     fd.append('name', $('#pName').value.trim());
     fd.append('price_mmk', $('#pPrice').value);
+    fd.append('stock', $('#pStock') ? $('#pStock').value : '99');
     fd.append('description', $('#pDesc').value);
     fd.append('active', $('#pActive').checked ? '1' : '0');
     fd.append('on_banner', $('#pOnBanner').checked ? '1' : '0');
@@ -279,6 +291,22 @@
   });
 
   document.addEventListener('click', async (e) => {
+    const stockBtn = e.target.closest('[data-stock-delta]');
+    if (stockBtn) {
+      const id = Number(stockBtn.dataset.stockDelta);
+      const delta = Number(stockBtn.dataset.delta);
+      if (!id || !Number.isFinite(delta)) return;
+      try {
+        await api('/api/admin/products/' + id + '/stock', {
+          method: 'PATCH',
+          body: JSON.stringify({ delta }),
+        });
+        await loadProducts();
+      } catch (err) {
+        toast(err.message);
+      }
+      return;
+    }
     const edit = e.target.closest('[data-edit-product]');
     if (edit) {
       const id = Number(edit.dataset.editProduct);
@@ -988,6 +1016,36 @@
     localStorage.setItem(CHAT_SEEN_KEY, JSON.stringify(seen));
   }
 
+  function clearChatSeen(id) {
+    const seen = loadChatSeen();
+    delete seen[String(id)];
+    localStorage.setItem(CHAT_SEEN_KEY, JSON.stringify(seen));
+  }
+
+  function clearChatPane() {
+    activeChatId = null;
+    const pane = $('#chatThreadPane');
+    if (!pane) return;
+    delete pane.dataset.threadId;
+    pane.innerHTML = '<div class="empty">ဘယ်ဘက်မှ ချတ် ရွေးပါ</div>';
+  }
+
+  async function deleteChatThread(id) {
+    const tid = Number(id);
+    if (!tid) return;
+    if (!confirm('ဤချတ်ကို ဖျက်မည်လား? စကားဝိုင်းနှင့် မက်ဆေ့ချ်အားလုံး ပျောက်သွားမည်။')) return;
+    try {
+      await api('/api/admin/chat/threads/' + tid, { method: 'DELETE' });
+      clearChatSeen(tid);
+      if (Number(activeChatId) === tid) clearChatPane();
+      toast('ချတ် ဖျက်ပြီးပါပြီ');
+      await loadChatThreads();
+    } catch (err) {
+      toast(err.message);
+      await loadChatThreads().catch(() => {});
+    }
+  }
+
   function isChatUnread(thread) {
     const seen = loadChatSeen();
     const last = String(thread.updated_at || '');
@@ -1048,16 +1106,21 @@
           ? (t.last_sender === 'admin' ? 'သင်: ' : '') + t.last_body
           : 'မက်ဆေ့ချ် မရှိသေးပါ';
         return `
-        <button type="button" class="${cls}" data-open-chat="${t.id}">
-          <div class="who">${escapeHtml(t.customer_name || 'ဖောက်သည်')} ${
-            t.status === 'closed' ? '<span class="badge cancelled">ပိတ်</span>' : ''
-          }${t.needs_reply ? ' <span class="badge pending">အသစ်</span>' : ''}</div>
-          <div class="preview">${escapeHtml(t.customer_phone || '')}${
-            t.order_id ? ' · ' + escapeHtml(t.order_id) : ''
-          }</div>
-          <div class="preview">${escapeHtml(preview)}</div>
-          <div class="when">${escapeHtml(formatChatWhen(t.updated_at))}</div>
-        </button>`;
+        <div class="${cls}" data-open-chat="${t.id}">
+          <div class="chat-thread-row">
+            <div class="chat-thread-main">
+              <div class="who">${escapeHtml(t.customer_name || 'ဖောက်သည်')} ${
+                t.status === 'closed' ? '<span class="badge cancelled">ပိတ်</span>' : ''
+              }${t.needs_reply ? ' <span class="badge pending">အသစ်</span>' : ''}</div>
+              <div class="preview">${escapeHtml(t.customer_phone || '')}${
+                t.order_id ? ' · ' + escapeHtml(t.order_id) : ''
+              }</div>
+              <div class="preview">${escapeHtml(preview)}</div>
+              <div class="when">${escapeHtml(formatChatWhen(t.updated_at))}</div>
+            </div>
+            <button type="button" class="btn btn-danger btn-sm chat-thread-del" data-del-chat="${t.id}" title="ချတ် ဖျက်မည်">ဖျက်မည်</button>
+          </div>
+        </div>`;
       })
       .join('');
   }
@@ -1065,6 +1128,12 @@
   async function loadChatThreads() {
     const threads = await api('/api/admin/chat/threads');
     chatThreadsCache = Array.isArray(threads) ? threads : [];
+    if (
+      activeChatId &&
+      !chatThreadsCache.some((t) => Number(t.id) === Number(activeChatId))
+    ) {
+      clearChatPane();
+    }
     renderChatThreadList(chatThreadsCache);
     updateChatBadge(chatThreadsCache);
     return chatThreadsCache;
@@ -1245,6 +1314,13 @@
   }
 
   document.addEventListener('click', (e) => {
+    const delBtn = e.target.closest('[data-del-chat]');
+    if (delBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      deleteChatThread(delBtn.dataset.delChat).catch((err) => toast(err.message));
+      return;
+    }
     const btn = e.target.closest('[data-open-chat]');
     if (!btn) return;
     openChatThread(btn.dataset.openChat).catch((err) => toast(err.message));

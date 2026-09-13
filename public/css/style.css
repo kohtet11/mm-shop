@@ -1071,6 +1071,17 @@ a.cart-btn {
   font: inherit;
   color: inherit;
 }
+.chat-thread-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.chat-thread-main { flex: 1; min-width: 0; }
+.chat-thread-del {
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+  white-space: nowrap;
+}
 .chat-thread-item:hover { background: #f8fafc; }
 .chat-thread-item.active {
   background: #f5f3ff;
@@ -1132,3 +1143,34 @@ a.cart-btn {
 .admin-chat-msg.admin .when { text-align: right; }
 .chat-admin-compose { display: flex; flex-direction: column; gap: 0.45rem; margin-top: 0.75rem; }
 .chat-admin-compose textarea { min-height: 4rem; resize: vertical; }
+
+.stock-adjust {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.stock-adjust .stock-val {
+  min-width: 1.6rem;
+  text-align: center;
+  font-weight: 700;
+}
+.stock-adjust .stock-val.out { color: #dc2626; }
+.stock-adjust .btn { padding: 0.15rem 0.45rem; min-width: 1.7rem; }
+.product-card.out-of-stock .thumb { opacity: 0.72; filter: grayscale(0.25); }
+.stock-badge {
+  position: absolute;
+  left: 0.5rem;
+  bottom: 0.5rem;
+  background: rgba(220, 38, 38, 0.92);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.25rem 0.45rem;
+  border-radius: 999px;
+  z-index: 1;
+}
+.product-card .thumb-wrap { position: relative; }
+.product-card .actions .btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}

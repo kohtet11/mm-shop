@@ -53,6 +53,10 @@ function initBetterSqlite3() {
         },
       };
     },
+    transaction(fn) {
+      const trx = database.transaction((...args) => fn(...args));
+      return (...args) => trx(...args);
+    },
     close() {
       database.close();
     },
@@ -85,6 +89,7 @@ function createTables(database) {
       active INTEGER DEFAULT 1,
       on_banner INTEGER DEFAULT 0,
       discount_percent INTEGER DEFAULT 0,
+      stock INTEGER DEFAULT 99,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -180,6 +185,9 @@ function migrateProductsColumns(database) {
   }
   if (!cols.includes('discount_percent')) {
     database.exec('ALTER TABLE products ADD COLUMN discount_percent INTEGER DEFAULT 0');
+  }
+  if (!cols.includes('stock')) {
+    database.exec('ALTER TABLE products ADD COLUMN stock INTEGER DEFAULT 99');
   }
 }
 
@@ -340,6 +348,13 @@ function parseOnBanner(value, fallback = 0) {
   return value === '0' || value === 0 || value === false || value === 'false' ? 0 : 1;
 }
 
+function parseStock(value, fallback = 99) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.min(1000000, n);
+}
+
 const SAMPLE_ASSET_DIR = '/assets/samples';
 
 const BUILTIN_SAMPLES = [
@@ -351,6 +366,7 @@ const BUILTIN_SAMPLES = [
     image_path: SAMPLE_ASSET_DIR + '/skullpanda.svg',
     on_banner: 1,
     discount_percent: 15,
+    stock: 99,
     prize_name: 'Skullpanda Blind Box',
     is_special: 1,
     prize_sort: 1,
@@ -363,6 +379,7 @@ const BUILTIN_SAMPLES = [
     image_path: SAMPLE_ASSET_DIR + '/nommi.svg',
     on_banner: 0,
     discount_percent: 0,
+    stock: 99,
     prize_name: 'Nommi Mini Figure',
     is_special: 0,
     prize_sort: 2,
@@ -375,6 +392,7 @@ const BUILTIN_SAMPLES = [
     image_path: SAMPLE_ASSET_DIR + '/zootopia.svg',
     on_banner: 0,
     discount_percent: 0,
+    stock: 99,
     prize_name: 'Zootopia Collectible',
     is_special: 0,
     prize_sort: 3,
@@ -387,6 +405,7 @@ const BUILTIN_SAMPLES = [
     image_path: SAMPLE_ASSET_DIR + '/spin-chance.svg',
     on_banner: 0,
     discount_percent: 0,
+    stock: 99,
   },
 ];
 
@@ -415,8 +434,8 @@ function isSampleImagePath(current, sample) {
 function seedBuiltins(database) {
   const findProductByName = database.prepare('SELECT * FROM products WHERE name = ?');
   const insertProduct = database.prepare(
-    `INSERT INTO products (name, price_mmk, description, image_path, active, on_banner, discount_percent)
-     VALUES (?, ?, ?, ?, 1, ?, ?)`
+    `INSERT INTO products (name, price_mmk, description, image_path, active, on_banner, discount_percent, stock)
+     VALUES (?, ?, ?, ?, 1, ?, ?, ?)`
   );
   const updateProductImage = database.prepare(
     `UPDATE products SET image_path = ?, updated_at = datetime('now') WHERE id = ?`
@@ -449,7 +468,8 @@ function seedBuiltins(database) {
         sample.desc,
         sample.image_path,
         sample.on_banner,
-        sample.discount_percent
+        sample.discount_percent,
+        sample.stock != null ? sample.stock : 99
       );
       row = { id: result.lastInsertRowid, image_path: sample.image_path };
       addedProducts += 1;
@@ -545,6 +565,25 @@ async function initSqlJsDb() {
           stmt.free();
           return rows;
         },
+      };
+    },
+    transaction(fn) {
+      return (...args) => {
+        try {
+          database.run('BEGIN');
+          const result = fn(...args);
+          database.run('COMMIT');
+          persist();
+          return result;
+        } catch (e) {
+          try {
+            database.run('ROLLBACK');
+          } catch (_) {}
+          try {
+            persist();
+          } catch (_) {}
+          throw e;
+        }
       };
     },
     close() {
@@ -771,7 +810,7 @@ function formatOrder(row, items) {
 app.get('/api/products', (_req, res) => {
   const products = db
     .prepare(
-      `SELECT id, name, price_mmk, description, image_path, active, on_banner, discount_percent
+      `SELECT id, name, price_mmk, description, image_path, active, on_banner, discount_percent, stock
        FROM products WHERE active = 1 ORDER BY id DESC`
     )
     .all();
@@ -819,50 +858,84 @@ app.post('/api/orders', (req, res) => {
         return res.status(400).json({ error: 'ခြင်းတောင်း ဗလာဖြစ်နေသည်' });
       }
 
-      let total = 0;
-      const lineItems = [];
+      const qtyByProduct = new Map();
       for (const it of parsedItems) {
-        const qty = Math.max(1, parseInt(it.quantity, 10) || 1);
-        const product = db
-          .prepare('SELECT id, name, price_mmk, active FROM products WHERE id = ?')
-          .get(it.product_id);
-        if (!product || !product.active) {
-          return res.status(400).json({ error: `ပစ္စည်း မရရှိနိုင်ပါ (id=${it.product_id})` });
+        const pid = parseInt(it.product_id, 10);
+        if (!Number.isFinite(pid)) {
+          return res.status(400).json({ error: 'Invalid product' });
         }
-        total += product.price_mmk * qty;
-        lineItems.push({
-          product_id: product.id,
-          product_name: product.name,
-          unit_price_mmk: product.price_mmk,
-          quantity: qty,
-        });
+        const qty = Math.max(1, parseInt(it.quantity, 10) || 1);
+        qtyByProduct.set(pid, (qtyByProduct.get(pid) || 0) + qty);
       }
 
       const orderId = 'MM' + Date.now().toString(36).toUpperCase() + uuidv4().slice(0, 4).toUpperCase();
       const slipPath = `slips/${req.file.filename}`;
+      const notesVal = notes ? String(notes).trim() : '';
 
-      db.prepare(
-        `INSERT INTO orders (order_id, customer_name, phone, address, notes, total_mmk, status, slip_path)
-         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`
-      ).run(
-        orderId,
-        nameVal,
-        phoneVal,
-        addressVal,
-        notes ? String(notes).trim() : '',
-        total,
-        slipPath
-      );
+      let total = 0;
+      let lineItems = [];
+      try {
+        const created = db.transaction(() => {
+          total = 0;
+          lineItems = [];
+          for (const [pid, qty] of qtyByProduct.entries()) {
+            const product = db
+              .prepare('SELECT id, name, price_mmk, active, stock FROM products WHERE id = ?')
+              .get(pid);
+            if (!product || !product.active) {
+              const err = new Error(`ပစ္စည်း မရရှိနိုင်ပါ (id=${pid})`);
+              err.status = 400;
+              throw err;
+            }
+            const available = Number.isFinite(Number(product.stock)) ? Number(product.stock) : 0;
+            if (available < qty) {
+              const err = new Error(
+                `${product.name} စတော့ မလောက်ပါ (ကျန် ${available})`
+              );
+              err.status = 400;
+              throw err;
+            }
+            const dec = db
+              .prepare(
+                `UPDATE products SET stock = stock - ?, updated_at = datetime('now')
+                 WHERE id = ? AND stock >= ?`
+              )
+              .run(qty, product.id, qty);
+            if (!dec.changes) {
+              const err = new Error(`${product.name} စတော့ မလောက်ပါ`);
+              err.status = 400;
+              throw err;
+            }
+            total += product.price_mmk * qty;
+            lineItems.push({
+              product_id: product.id,
+              product_name: product.name,
+              unit_price_mmk: product.price_mmk,
+              quantity: qty,
+            });
+          }
 
-      const itemIns = db.prepare(
-        `INSERT INTO order_items (order_id, product_id, product_name, unit_price_mmk, quantity)
-         VALUES (?, ?, ?, ?, ?)`
-      );
-      for (const li of lineItems) {
-        itemIns.run(orderId, li.product_id, li.product_name, li.unit_price_mmk, li.quantity);
+          db.prepare(
+            `INSERT INTO orders (order_id, customer_name, phone, address, notes, total_mmk, status, slip_path)
+             VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`
+          ).run(orderId, nameVal, phoneVal, addressVal, notesVal, total, slipPath);
+
+          const itemIns = db.prepare(
+            `INSERT INTO order_items (order_id, product_id, product_name, unit_price_mmk, quantity)
+             VALUES (?, ?, ?, ?, ?)`
+          );
+          for (const li of lineItems) {
+            itemIns.run(orderId, li.product_id, li.product_name, li.unit_price_mmk, li.quantity);
+          }
+          return { orderId, total };
+        })();
+        res.json({ ok: true, order_id: created.orderId, total_mmk: created.total });
+      } catch (e) {
+        if (e && e.status === 400) {
+          return res.status(400).json({ error: e.message });
+        }
+        throw e;
       }
-
-      res.json({ ok: true, order_id: orderId, total_mmk: total });
     } catch (e) {
       console.error(e);
       res.status(500).json({ error: 'Server error' });
@@ -1357,7 +1430,7 @@ app.get('/api/admin/me', (req, res) => {
 app.get('/api/admin/products', requireAdmin, (_req, res) => {
   const products = db
     .prepare(
-      `SELECT id, name, price_mmk, description, image_path, active, on_banner, discount_percent, created_at, updated_at
+      `SELECT id, name, price_mmk, description, image_path, active, on_banner, discount_percent, stock, created_at, updated_at
        FROM products ORDER BY id DESC`
     )
     .all();
@@ -1368,7 +1441,7 @@ app.post('/api/admin/products', requireAdmin, (req, res) => {
   uploadProduct.single('image')(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message });
     try {
-      const { name, price_mmk, description, active, on_banner, discount_percent } = req.body;
+      const { name, price_mmk, description, active, on_banner, discount_percent, stock } = req.body;
       if (!name || price_mmk === undefined) {
         return res.status(400).json({ error: 'name and price required' });
       }
@@ -1376,10 +1449,11 @@ app.post('/api/admin/products', requireAdmin, (req, res) => {
       const isActive = active === '0' || active === 0 || active === false ? 0 : 1;
       const isBanner = parseOnBanner(on_banner, 0);
       const discount = clampDiscountPercent(discount_percent);
+      const stockVal = parseStock(stock, 99);
       const result = db
         .prepare(
-          `INSERT INTO products (name, price_mmk, description, image_path, active, on_banner, discount_percent)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO products (name, price_mmk, description, image_path, active, on_banner, discount_percent, stock)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           String(name).trim(),
@@ -1388,7 +1462,8 @@ app.post('/api/admin/products', requireAdmin, (req, res) => {
           image_path,
           isActive,
           isBanner,
-          discount
+          discount,
+          stockVal
         );
       const product = db.prepare('SELECT * FROM products WHERE id = ?').get(result.lastInsertRowid);
       res.json(product);
@@ -1407,7 +1482,7 @@ app.put('/api/admin/products/:id', requireAdmin, (req, res) => {
       const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
       if (!existing) return res.status(404).json({ error: 'Not found' });
 
-      const { name, price_mmk, description, active, on_banner, discount_percent } = req.body;
+      const { name, price_mmk, description, active, on_banner, discount_percent, stock } = req.body;
       let image_path = existing.image_path;
       if (req.file) {
         image_path = `products/${req.file.filename}`;
@@ -1425,10 +1500,14 @@ app.put('/api/admin/products/:id', requireAdmin, (req, res) => {
         discount_percent === undefined
           ? (existing.discount_percent || 0)
           : clampDiscountPercent(discount_percent);
+      const stockVal =
+        stock === undefined || stock === null || stock === ''
+          ? (Number.isFinite(Number(existing.stock)) ? Number(existing.stock) : 99)
+          : parseStock(stock, 0);
 
       db.prepare(
         `UPDATE products SET name = ?, price_mmk = ?, description = ?, image_path = ?,
-         active = ?, on_banner = ?, discount_percent = ?, updated_at = datetime('now') WHERE id = ?`
+         active = ?, on_banner = ?, discount_percent = ?, stock = ?, updated_at = datetime('now') WHERE id = ?`
       ).run(
         name !== undefined ? String(name).trim() : existing.name,
         price_mmk !== undefined ? parseInt(price_mmk, 10) || 0 : existing.price_mmk,
@@ -1437,6 +1516,7 @@ app.put('/api/admin/products/:id', requireAdmin, (req, res) => {
         isActive,
         isBanner,
         discount,
+        stockVal,
         id
       );
 
@@ -1456,6 +1536,35 @@ app.delete('/api/admin/products/:id', requireAdmin, (req, res) => {
   db.prepare('UPDATE spin_prizes SET product_id = NULL WHERE product_id = ?').run(id);
   db.prepare('DELETE FROM products WHERE id = ?').run(id);
   res.json({ ok: true });
+});
+
+app.patch('/api/admin/products/:id/stock', requireAdmin, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    const body = req.body || {};
+    let next;
+    if (body.delta !== undefined && body.delta !== null && body.delta !== '') {
+      const delta = parseInt(body.delta, 10);
+      if (!Number.isFinite(delta)) {
+        return res.status(400).json({ error: 'Invalid delta' });
+      }
+      const cur = Number.isFinite(Number(existing.stock)) ? Number(existing.stock) : 0;
+      next = Math.max(0, Math.min(1000000, cur + delta));
+    } else if (body.stock !== undefined && body.stock !== null && body.stock !== '') {
+      next = parseStock(body.stock, 0);
+    } else {
+      return res.status(400).json({ error: 'stock or delta required' });
+    }
+    db.prepare(
+      `UPDATE products SET stock = ?, updated_at = datetime('now') WHERE id = ?`
+    ).run(next, id);
+    res.json(db.prepare('SELECT * FROM products WHERE id = ?').get(id));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // ========== ADMIN ORDERS ==========
@@ -1876,6 +1985,22 @@ app.patch('/api/admin/chat/threads/:id', requireAdmin, (req, res) => {
       `UPDATE chat_threads SET status = ?, updated_at = datetime('now') WHERE id = ?`
     ).run(status, thread.id);
     res.json(formatChatThread(getChatThreadById(thread.id)));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.delete('/api/admin/chat/threads/:id', requireAdmin, (req, res) => {
+  try {
+    const thread = getChatThreadById(req.params.id);
+    if (!thread) return res.status(404).json({ error: 'ချတ် မတွေ့ပါ' });
+    const deleteThread = db.transaction((tid) => {
+      db.prepare('DELETE FROM chat_messages WHERE thread_id = ?').run(tid);
+      db.prepare('DELETE FROM chat_threads WHERE id = ?').run(tid);
+    });
+    deleteThread(thread.id);
+    res.json({ ok: true, id: thread.id });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Server error' });

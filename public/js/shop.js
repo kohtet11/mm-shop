@@ -332,6 +332,11 @@
     }
   }
 
+  function productStock(p) {
+    const n = Number(p && p.stock);
+    return Number.isFinite(n) ? n : 0;
+  }
+
   function renderProducts() {
     const grid = $('#productsGrid');
     if (!products.length) {
@@ -339,23 +344,28 @@
       return;
     }
     grid.innerHTML = products
-      .map(
-        (p) => `
-      <article class="product-card" id="product-${p.id}" data-id="${p.id}">
+      .map((p) => {
+        const stock = productStock(p);
+        const out = stock <= 0;
+        return `
+      <article class="product-card${out ? ' out-of-stock' : ''}" id="product-${p.id}" data-id="${p.id}">
         <div class="thumb-wrap">
           <img class="thumb" src="${imgUrl(p.image_path)}" alt="${escapeHtml(p.name)}" loading="lazy" />
           ${discountBadgeHtml(p.discount_percent)}
+          ${out ? '<span class="stock-badge">စတော့ကုန် / Out of stock</span>' : ''}
         </div>
         <div class="body">
           <h3>${escapeHtml(p.name)}</h3>
           <div class="desc">${escapeHtml(p.description || '')}</div>
           <div class="price">${formatMMK(p.price_mmk)}</div>
           <div class="actions">
-            <button type="button" class="btn btn-primary" data-add="${p.id}">ခြင်းတောင်းထည့်မည်</button>
+            <button type="button" class="btn btn-primary" data-add="${p.id}" ${
+              out ? 'disabled aria-disabled="true"' : ''
+            }>${out ? 'စတော့ကုန်' : 'ခြင်းတောင်းထည့်မည်'}</button>
           </div>
         </div>
-      </article>`
-      )
+      </article>`;
+      })
       .join('');
   }
 
@@ -370,8 +380,18 @@
   function addToCart(productId) {
     const p = products.find((x) => x.id === productId);
     if (!p) return;
+    const stock = productStock(p);
+    if (stock <= 0) {
+      toast('စတော့ကုန် / Out of stock');
+      return;
+    }
     const existing = cart.find((x) => x.product_id === productId);
-    if (existing) existing.quantity += 1;
+    const nextQty = (existing ? existing.quantity : 0) + 1;
+    if (nextQty > stock) {
+      toast('စတော့ မလောက်ပါ (ကျန် ' + stock + ')');
+      return;
+    }
+    if (existing) existing.quantity = nextQty;
     else {
       cart.push({
         product_id: p.id,
@@ -388,7 +408,14 @@
   function setQty(productId, qty) {
     const item = cart.find((x) => x.product_id === productId);
     if (!item) return;
-    item.quantity = Math.max(1, qty);
+    const p = products.find((x) => x.id === productId);
+    const stock = p ? productStock(p) : Infinity;
+    let next = Math.max(1, qty);
+    if (Number.isFinite(stock) && next > stock) {
+      next = Math.max(1, stock);
+      toast('စတော့ မလောက်ပါ (ကျန် ' + stock + ')');
+    }
+    item.quantity = next;
     saveCart();
     renderCart();
   }
