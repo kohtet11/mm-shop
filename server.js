@@ -100,6 +100,8 @@ function createTables(database) {
       status TEXT DEFAULT 'pending',
       slip_path TEXT NOT NULL,
       spin_credits INTEGER DEFAULT 0,
+      spin_credits_locked INTEGER DEFAULT 0,
+      spin_credits_granted_at TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -186,6 +188,52 @@ function migrateOrdersSpinCredits(database) {
   if (!cols.includes('spin_credits')) {
     database.exec('ALTER TABLE orders ADD COLUMN spin_credits INTEGER DEFAULT 0');
   }
+  if (!cols.includes('spin_credits_locked')) {
+    database.exec('ALTER TABLE orders ADD COLUMN spin_credits_locked INTEGER DEFAULT 0');
+  }
+  if (!cols.includes('spin_credits_granted_at')) {
+    database.exec('ALTER TABLE orders ADD COLUMN spin_credits_granted_at TEXT');
+  }
+}
+
+/** Backfill lock for orders that already had credits granted or spins played. */
+function migrateOrdersSpinCreditsLockBackfill(database) {
+  const cols = database.prepare('PRAGMA table_info(orders)').all().map((c) => c.name);
+  if (!cols.includes('spin_credits_locked')) return;
+  database.exec(`
+    UPDATE orders SET
+      spin_credits_locked = 1,
+      spin_credits_granted_at = COALESCE(spin_credits_granted_at, datetime('now'))
+    WHERE COALESCE(spin_credits_locked, 0) = 0
+      AND (
+        COALESCE(spin_credits, 0) > 0
+        OR order_id IN (
+          SELECT DISTINCT order_id FROM spin_plays
+          WHERE order_id IS NOT NULL AND order_id != ''
+        )
+      )
+  `);
+}
+
+function orderSpinCreditsLocked(order) {
+  return !!(Number(order && order.spin_credits_locked) || (order && order.spin_credits_granted_at));
+}
+
+/** Had spins = grant lock/flag OR spin_plays > 0 (or currently holding credits after grant). */
+function orderHadSpinCredits(database, order) {
+  if (orderSpinCreditsLocked(order)) return true;
+  if ((Number(order && order.spin_credits) || 0) > 0) return true;
+  return getOrderSpinPlayCount(database, order.order_id) > 0;
+}
+
+function getOrderSpinCreditState(database, order) {
+  const credits = Number(order && order.spin_credits) || 0;
+  const locked = orderSpinCreditsLocked(order);
+  const playCount = getOrderSpinPlayCount(database, order.order_id);
+  const hadSpins = locked || playCount > 0 || credits > 0;
+  // Expired only when remaining is 0 AND credits were previously granted/used
+  const expired = credits === 0 && (locked || playCount > 0);
+  return { credits, locked, expired, hadSpins, playCount };
 }
 
 function migrateSpinPlaysColumns(database) {
@@ -638,6 +686,7 @@ function getSettingsMap(database) {
 }
 
 function formatOrder(row, items) {
+  const spin = getOrderSpinCreditState(db, row);
   return {
     id: row.id,
     order_id: row.order_id,
@@ -648,7 +697,11 @@ function formatOrder(row, items) {
     total_mmk: row.total_mmk,
     status: row.status,
     slip_path: row.slip_path,
-    spin_credits: Number(row.spin_credits) || 0,
+    spin_credits: spin.credits,
+    spin_credits_locked: spin.locked ? 1 : 0,
+    spin_credits_granted_at: row.spin_credits_granted_at || null,
+    spin_expired: spin.expired,
+    spin_locked: spin.locked,
     created_at: row.created_at,
     updated_at: row.updated_at,
     items: items || [],
@@ -989,6 +1042,21 @@ function pickWeightedSpinPrize(prizes) {
   return prizes[prizes.length - 1];
 }
 
+
+function findSpinPrizeByProductId(database, productId, exceptPrizeId) {
+  if (productId == null || productId === '') return null;
+  const pid = Number(productId);
+  if (!Number.isFinite(pid)) return null;
+  if (exceptPrizeId != null) {
+    return database
+      .prepare('SELECT id, name FROM spin_prizes WHERE product_id = ? AND id != ? LIMIT 1')
+      .get(pid, exceptPrizeId);
+  }
+  return database
+    .prepare('SELECT id, name FROM spin_prizes WHERE product_id = ? LIMIT 1')
+    .get(pid);
+}
+
 function formatSpinPrizePublic(row) {
   return {
     id: row.id,
@@ -1072,12 +1140,15 @@ function spinUnlockHandler(req, res) {
       return res.status(404).json({ error: 'အော်ဒါ မတွေ့ပါ — အော်ဒါနံပါတ် စစ်ပါ' });
     }
     if (rejectIfIncompleteContact(order, res)) return;
-    const credits = Number(order.spin_credits) || 0;
+    const spin = getOrderSpinCreditState(db, order);
     const cycle = getOrderSpinCycleProgress(db, order.order_id);
     res.json({
       ok: true,
       orderId: order.order_id,
-      spinCredits: credits,
+      credits: spin.credits,
+      expired: spin.expired,
+      locked: spin.locked,
+      spinCredits: spin.credits,
       spinCycle: cycle,
     });
   } catch (e) {
@@ -1098,10 +1169,15 @@ app.post('/api/spin', (req, res) => {
       return res.status(404).json({ error: 'အော်ဒါ မတွေ့ပါ — အော်ဒါနံပါတ် စစ်ပါ' });
     }
     if (rejectIfIncompleteContact(order, res)) return;
-    const credits = Number(order.spin_credits) || 0;
-    if (credits < 1) {
+    const spin = getOrderSpinCreditState(db, order);
+    if (spin.credits < 1) {
       return res.status(403).json({
-        error: 'ကံစမ်းခွင့် မရှိပါ — Admin က အခွင့်ထည့်ပေးမှ လှည့်နိုင်သည်',
+        error: spin.expired
+          ? 'သက်တမ်းကုန်ဆုံး — ကံစမ်းခွင့် အားလုံး အသုံးပြုပြီးပါပြီ'
+          : 'ကံစမ်းခွင့် မရှိပါ — Admin က အခွင့်ထည့်ပေးမှ လှည့်နိုင်သည်',
+        credits: 0,
+        expired: spin.expired,
+        locked: spin.locked,
         spinCredits: 0,
       });
     }
@@ -1133,9 +1209,16 @@ app.post('/api/spin', (req, res) => {
       )
       .run(order.order_id);
     if (!upd.changes) {
+      const again = db.prepare('SELECT * FROM orders WHERE order_id = ?').get(order.order_id);
+      const st = getOrderSpinCreditState(db, again || order);
       return res.status(403).json({
-        error: 'ကံစမ်းခွင့် မရှိပါ',
-        spinCredits: 0,
+        error: st.expired
+          ? 'သက်တမ်းကုန်ဆုံး — ကံစမ်းခွင့် အားလုံး အသုံးပြုပြီးပါပြီ'
+          : 'ကံစမ်းခွင့် မရှိပါ',
+        credits: st.credits,
+        expired: st.expired,
+        locked: st.locked,
+        spinCredits: st.credits,
       });
     }
 
@@ -1144,15 +1227,17 @@ app.post('/api/spin', (req, res) => {
       `INSERT INTO spin_plays (order_id, prize_id, prize_name) VALUES (?, ?, ?)`
     ).run(order.order_id, won.id, won.name);
 
-    const left = db
-      .prepare('SELECT spin_credits FROM orders WHERE order_id = ?')
-      .get(order.order_id);
+    const leftRow = db.prepare('SELECT * FROM orders WHERE order_id = ?').get(order.order_id);
+    const leftState = getOrderSpinCreditState(db, leftRow || { ...order, spin_credits: 0 });
 
     res.json({
       prizeId: won.id,
       name: won.name,
       productId: won.product_id || null,
-      spinCredits: Number(left && left.spin_credits) || 0,
+      credits: leftState.credits,
+      expired: leftState.expired,
+      locked: leftState.locked,
+      spinCredits: leftState.credits,
       isSpecialSlot: pick.isSpecialSlot,
       spinNumber: nextSpinNumber,
       nextInCycle: (nextSpinNumber % SPIN_CYCLE_SIZE) || SPIN_CYCLE_SIZE,
@@ -1369,14 +1454,30 @@ app.patch('/api/admin/orders/:orderId/spin-credits', requireAdmin, (req, res) =>
   try {
     const o = db.prepare('SELECT * FROM orders WHERE order_id = ?').get(req.params.orderId);
     if (!o) return res.status(404).json({ error: 'Not found' });
+    if (orderSpinCreditsLocked(o)) {
+      return res.status(403).json({
+        error: 'မှားယွင်း ထပ်မဖြည့်ရန် သော့ခတ်ထားသည် — တစ်ကြိမ်သာ သတ်မှတ်နိုင်သည်',
+        locked: true,
+        expired: getOrderSpinCreditState(db, o).expired,
+        credits: Number(o.spin_credits) || 0,
+      });
+    }
     let credits = parseInt(req.body && req.body.spin_credits, 10);
     if (!Number.isFinite(credits) || credits < 0) {
       return res.status(400).json({ error: 'spin_credits သည် 0 သို့မဟုတ် အပေါင်းကိန်း ဖြစ်ရမည်' });
     }
     credits = Math.min(1000, credits);
-    db.prepare(
-      `UPDATE orders SET spin_credits = ?, updated_at = datetime('now') WHERE order_id = ?`
-    ).run(credits, req.params.orderId);
+    if (credits > 0) {
+      db.prepare(
+        `UPDATE orders SET spin_credits = ?, spin_credits_locked = 1,
+         spin_credits_granted_at = datetime('now'), updated_at = datetime('now')
+         WHERE order_id = ?`
+      ).run(credits, req.params.orderId);
+    } else {
+      db.prepare(
+        `UPDATE orders SET spin_credits = ?, updated_at = datetime('now') WHERE order_id = ?`
+      ).run(credits, req.params.orderId);
+    }
     const updated = db.prepare('SELECT * FROM orders WHERE order_id = ?').get(req.params.orderId);
     const items = db
       .prepare('SELECT * FROM order_items WHERE order_id = ?')
@@ -1506,6 +1607,12 @@ app.post('/api/admin/spin-prizes', requireAdmin, (req, res) => {
       if (!Number.isFinite(pid)) return res.status(400).json({ error: 'Invalid product_id' });
       const prod = db.prepare('SELECT id FROM products WHERE id = ?').get(pid);
       if (!prod) return res.status(400).json({ error: 'ပစ္စည်း မတွေ့ပါ' });
+      const taken = findSpinPrizeByProductId(db, pid);
+      if (taken) {
+        return res.status(400).json({
+          error: 'ဤပစ္စည်းသည် ဘီးဆု #' + taken.id + ' နှင့် ချိတ်ပြီးသားဖြစ်သည်',
+        });
+      }
     }
     const hit = clampHitEvery(hit_every);
     const isActive = active === '0' || active === 0 || active === false || active === 'false' ? 0 : 1;
@@ -1549,6 +1656,12 @@ app.put('/api/admin/spin-prizes/:id', requireAdmin, (req, res) => {
         if (!Number.isFinite(pid)) return res.status(400).json({ error: 'Invalid product_id' });
         const prod = db.prepare('SELECT id FROM products WHERE id = ?').get(pid);
         if (!prod) return res.status(400).json({ error: 'ပစ္စည်း မတွေ့ပါ' });
+        const taken = findSpinPrizeByProductId(db, pid, id);
+        if (taken) {
+          return res.status(400).json({
+            error: 'ဤပစ္စည်းသည် ဘီးဆု #' + taken.id + ' နှင့် ချိတ်ပြီးသားဖြစ်သည်',
+          });
+        }
       }
     }
 
@@ -1880,6 +1993,7 @@ async function start() {
   migrateOrdersSpinCredits(db);
   migrateSpinPlaysColumns(db);
   migrateSpinPrizesSpecial(db);
+  migrateOrdersSpinCreditsLockBackfill(db);
   seedIfEmpty(db);
   ensureDefaultSettings(db);
 

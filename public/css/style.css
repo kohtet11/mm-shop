@@ -417,6 +417,28 @@ img { max-width: 100%; display: block; }
 .badge.paid_confirmed { background: #d1fae5; color: #065f46; }
 .badge.shipped { background: #dbeafe; color: #1e40af; }
 .badge.cancelled { background: #ffe4e6; color: #9f1239; }
+.badge.spin-expired { background: #fee2e2; color: #991b1b; }
+.badge.spin-locked { background: #e2e8f0; color: #475569; }
+.btn.dimmed,
+.btn:disabled.dimmed {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(0.25);
+}
+.btn-spin.spin-expired {
+  background: #94a3b8 !important;
+  color: #fff !important;
+  opacity: 0.85;
+  cursor: not-allowed;
+  animation: none;
+  box-shadow: none;
+  filter: none;
+}
+#orderSpinCredits:disabled {
+  opacity: 0.55;
+  background: #f1f5f9;
+  cursor: not-allowed;
+}
 
 .toast {
   position: fixed;

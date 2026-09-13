@@ -12,6 +12,8 @@
   let spinRotation = 0;
   let spinBusy = false;
   let spinCredits = 0;
+  let spinExpired = false;
+  let spinLocked = false;
   let spinUnlockedOrderId = '';
   const SPIN_COLORS = [
     '#7c3aed', '#a855f7', '#c026d3', '#db2777',
@@ -660,22 +662,34 @@
     updateSpinButton();
   }
 
+  function applySpinStateFromApi(data) {
+    if (!data || typeof data !== 'object') return;
+    if (data.credits != null) spinCredits = Number(data.credits) || 0;
+    else if (typeof data.spinCredits === 'number') spinCredits = data.spinCredits;
+    if (typeof data.expired === 'boolean') spinExpired = data.expired;
+    if (typeof data.locked === 'boolean') spinLocked = data.locked;
+  }
+
   function updateSpinButton() {
     const btn = $('#spinBtn');
     const hint = $('#spinHint');
     if (!btn) return;
     const n = Math.max(0, Number(spinCredits) || 0);
-    btn.textContent = 'ကံစမ်းမည် (' + n + ')';
-    const canSpin = n >= 1 && !spinBusy && !!spinUnlockedOrderId;
+    const expired = !!spinExpired && !!spinUnlockedOrderId;
+    btn.textContent = expired ? 'သက်တမ်းကုန်ဆုံး' : 'ကံစမ်းမည် (' + n + ')';
+    const canSpin = n >= 1 && !spinBusy && !!spinUnlockedOrderId && !expired;
     btn.disabled = !canSpin;
     btn.classList.toggle('ready', canSpin);
     btn.classList.toggle('dimmed', !canSpin);
+    btn.classList.toggle('spin-expired', expired);
     if (hint) {
       if (spinBusy) hint.textContent = 'လှည့်နေသည်…';
       else if (!spinUnlockedOrderId) {
         hint.textContent = 'အော်ဒါနံပါတ် ထည့်ပြီး ကံစမ်းခွင့် စစ်ပါ';
+      } else if (expired) {
+        hint.textContent = 'သက်တမ်းကုန်ဆုံး — ကံစမ်းခွင့် အားလုံး အသုံးပြုပြီးပါပြီ';
       } else if (n < 1) {
-        hint.textContent = 'ကံစမ်းခွင့် ကုန်သွားပါပြီ — Admin ထံ ဆက်သွယ်ပါ';
+        hint.textContent = 'ကံစမ်းခွင့် မရှိသေးပါ — Admin က သတ်မှတ်ပေးမှ လှည့်နိုင်သည်';
       } else {
         hint.textContent = 'ကျန်ရှိသော အခွင့်: ' + n;
       }
@@ -821,18 +835,27 @@
         throw new Error(data.error || 'မတွေ့ပါ');
       }
       spinUnlockedOrderId = data.orderId || orderId;
-      spinCredits = Number(data.spinCredits) || 0;
+      applySpinStateFromApi(data);
       saveSpinSession();
       if (msg) {
-        msg.textContent =
-          spinCredits >= 1
-            ? 'ကံစမ်းခွင့် ' + spinCredits + ' ကြိမ် ရှိသည် — ခလုတ် လင်းနေသည်'
-            : 'အော်ဒါတွေ့ပါပြီ — ကံစမ်းခွင့် 0 (Admin က ထည့်ပေးမှ လှည့်နိုင်သည်)';
-        msg.classList.toggle('ok', spinCredits >= 1);
+        if (spinExpired) {
+          msg.textContent = 'သက်တမ်းကုန်ဆုံး — ကံစမ်းခွင့် အားလုံး အသုံးပြုပြီးပါပြီ';
+          msg.classList.remove('ok');
+        } else if (spinCredits >= 1) {
+          msg.textContent =
+            'ကံစမ်းခွင့် ' + spinCredits + ' ကြိမ် ရှိသည် — ခလုတ် လင်းနေသည်';
+          msg.classList.add('ok');
+        } else {
+          msg.textContent =
+            'အော်ဒါတွေ့ပါပြီ — ကံစမ်းခွင့် မရှိသေးပါ (Admin က သတ်မှတ်ပေးမှ လှည့်နိုင်သည်)';
+          msg.classList.remove('ok');
+        }
       }
       updateSpinButton();
     } catch (err) {
       spinCredits = 0;
+      spinExpired = false;
+      spinLocked = false;
       spinUnlockedOrderId = '';
       saveSpinSession();
       if (msg) {
@@ -845,9 +868,9 @@
 
   async function doSpin() {
     if (spinBusy || !spinPrizes.length) return;
-    if (!spinUnlockedOrderId || spinCredits < 1) {
+    if (!spinUnlockedOrderId || spinCredits < 1 || spinExpired) {
       updateSpinButton();
-      toast('ကံစမ်းခွင့် မရှိပါ');
+      toast(spinExpired ? 'သက်တမ်းကုန်ဆုံး' : 'ကံစမ်းခွင့် မရှိပါ');
       return;
     }
     spinBusy = true;
@@ -862,7 +885,7 @@
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        if (typeof data.spinCredits === 'number') spinCredits = data.spinCredits;
+        applySpinStateFromApi(data);
         if (data.code === 'missing_contact') {
           throw new Error(
             data.error ||
@@ -871,7 +894,7 @@
         }
         throw new Error(data.error || 'လှည့်မရပါ');
       }
-      if (typeof data.spinCredits === 'number') spinCredits = data.spinCredits;
+      applySpinStateFromApi(data);
 
       let idx = spinPrizes.findIndex((p) => p.id === data.prizeId);
       if (idx < 0) {
@@ -886,8 +909,13 @@
       showSpinResult(data);
       const msg = $('#spinUnlockMsg');
       if (msg) {
-        msg.textContent = 'ကျန်ရှိသော အခွင့်: ' + spinCredits;
-        msg.classList.toggle('ok', spinCredits >= 1);
+        if (spinExpired) {
+          msg.textContent = 'သက်တမ်းကုန်ဆုံး — ကံစမ်းခွင့် အားလုံး အသုံးပြုပြီးပါပြီ';
+          msg.classList.remove('ok');
+        } else {
+          msg.textContent = 'ကျန်ရှိသော အခွင့်: ' + spinCredits;
+          msg.classList.toggle('ok', spinCredits >= 1);
+        }
       }
     } catch (err) {
       toast(err.message || 'အမှားဖြစ်နေသည်');

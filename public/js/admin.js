@@ -402,7 +402,13 @@
         <td>
           <strong>${escapeHtml(o.order_id)}</strong>
           <div class="hint">${escapeHtml(o.created_at || '')}</div>
-          <div class="hint">ဘီးအခွင့်: ${Number(o.spin_credits) || 0}</div>
+          <div class="hint">ဘီးအခွင့်: ${Number(o.spin_credits) || 0}${
+            o.spin_expired
+              ? ' <span class="badge spin-expired">သက်တမ်းကုန်ဆုံး</span>'
+              : o.spin_locked || o.spin_credits_locked
+                ? ' <span class="badge spin-locked">သော့ခတ်</span>'
+                : ''
+          }</div>
         </td>
         <td>
           ${escapeHtml(o.customer_name)}<br/>
@@ -467,17 +473,29 @@
         </select>
       </div>
       <div class="form-group">
-        <label for="orderSpinCredits">စပင်ဘီး ကံစမ်းခွင့် (spin_credits)</label>
-        <input id="orderSpinCredits" type="number" min="0" step="1" value="${Number(o.spin_credits) || 0}" />
-        <div class="hint">စလစ်/ငွေပေးချေမှုအရ အခွင့် အရေအတွက် သတ်မှတ်ပါ (ဥပမာ ၁ ကြိမ် = 1)</div>
+        <label for="orderSpinCredits">စပင်ဘီး ကံစမ်းခွင့် (spin_credits)${
+          o.spin_expired
+            ? ' <span class="badge spin-expired">သက်တမ်းကုန်ဆုံး</span>'
+            : ''
+        }</label>
+        <input id="orderSpinCredits" type="number" min="0" step="1" value="${Number(o.spin_credits) || 0}" ${
+          o.spin_locked || o.spin_credits_locked ? 'disabled' : ''
+        } />
+        <div class="hint">${
+          o.spin_locked || o.spin_credits_locked
+            ? 'တစ်ကြိမ်သာ သတ်မှတ်နိုင်သည် / မှားယွင်း ထပ်မဖြည့်ရန် သော့ခတ်ထားသည်'
+            : 'စလစ်/ငွေပေးချေမှုအရ အခွင့် အရေအတွက် သတ်မှတ်ပါ (ဥပမာ ၁ ကြိမ် = 1) — တစ်ကြိမ်သာ သတ်မှတ်နိုင်သည်'
+        }</div>
       </div>
       <div class="row-actions" style="gap:0.5rem;flex-wrap:wrap;margin-bottom:0.75rem">
         <button type="button" class="btn btn-primary btn-sm" id="saveStatusBtn" data-oid="${escapeHtml(
         o.order_id
       )}">အခြေအနေ သိမ်းမည်</button>
-        <button type="button" class="btn btn-pink btn-sm" id="saveSpinCreditsBtn" data-oid="${escapeHtml(
+        <button type="button" class="btn btn-pink btn-sm${
+          o.spin_locked || o.spin_credits_locked ? ' dimmed' : ''
+        }" id="saveSpinCreditsBtn" data-oid="${escapeHtml(
         o.order_id
-      )}">ကံစမ်းခွင့် သိမ်းမည်</button>
+      )}" ${o.spin_locked || o.spin_credits_locked ? 'disabled' : ''}>ကံစမ်းခွင့် သိမ်းမည်</button>
         <button type="button" class="btn btn-danger btn-sm" id="deleteOrderBtn" data-oid="${escapeHtml(
         o.order_id
       )}">ဖျက်မည်</button>
@@ -519,21 +537,28 @@
       }
     };
 
-    $('#saveSpinCreditsBtn').onclick = async () => {
-      try {
-        const credits = Math.max(0, parseInt($('#orderSpinCredits').value, 10) || 0);
-        await api('/api/admin/orders/' + encodeURIComponent(o.order_id) + '/spin-credits', {
-          method: 'PATCH',
-          body: JSON.stringify({ spin_credits: credits }),
-        });
-        toast('ကံစမ်းခွင့် သိမ်းပြီး');
-        loadOrders();
-        loadSpinWins().catch(() => {});
-        openOrder(o.order_id);
-      } catch (err) {
-        toast(err.message);
-      }
-    };
+    const saveSpinBtn = $('#saveSpinCreditsBtn');
+    if (saveSpinBtn) {
+      saveSpinBtn.onclick = async () => {
+        if (o.spin_locked || o.spin_credits_locked || saveSpinBtn.disabled) {
+          toast('မှားယွင်း ထပ်မဖြည့်ရန် သော့ခတ်ထားသည်');
+          return;
+        }
+        try {
+          const credits = Math.max(0, parseInt($('#orderSpinCredits').value, 10) || 0);
+          await api('/api/admin/orders/' + encodeURIComponent(o.order_id) + '/spin-credits', {
+            method: 'PATCH',
+            body: JSON.stringify({ spin_credits: credits }),
+          });
+          toast('ကံစမ်းခွင့် သိမ်းပြီး');
+          loadOrders();
+          loadSpinWins().catch(() => {});
+          openOrder(o.order_id);
+        } catch (err) {
+          toast(err.message);
+        }
+      };
+    }
 
     const delBtn = $('#deleteOrderBtn');
     if (delBtn) {
@@ -797,6 +822,20 @@
     return rows;
   }
 
+  function getLinkedSpinProductIds(exceptProductId) {
+    const prizes = loadSpinPrizes._cache || [];
+    const except = exceptProductId != null && exceptProductId !== '' ? Number(exceptProductId) : null;
+    const ids = new Set();
+    for (const s of prizes) {
+      if (!s.product_id) continue;
+      const pid = Number(s.product_id);
+      if (!Number.isFinite(pid)) continue;
+      if (except != null && pid === except) continue;
+      ids.add(pid);
+    }
+    return ids;
+  }
+
   async function fillSpinProductOptions(selectedId) {
     const sel = $('#spinProduct');
     if (!sel) return;
@@ -809,9 +848,21 @@
         products = [];
       }
     }
+    if (!loadSpinPrizes._cache) {
+      try {
+        await loadSpinPrizes();
+      } catch {
+        /* ignore */
+      }
+    }
+    const linkedIds = getLinkedSpinProductIds(selectedId);
+    const available = products.filter((p) => {
+      if (selectedId && Number(selectedId) === Number(p.id)) return true;
+      return !linkedIds.has(Number(p.id));
+    });
     sel.innerHTML =
       '<option value="">— မချိတ် —</option>' +
-      products
+      available
         .map(
           (p) =>
             `<option value="${p.id}"${
