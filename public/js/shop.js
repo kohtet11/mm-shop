@@ -13,7 +13,6 @@
   let spinBusy = false;
   let spinCredits = 0;
   let spinUnlockedOrderId = '';
-  let spinUnlockedPhone = '';
   const SPIN_COLORS = [
     '#7c3aed', '#a855f7', '#c026d3', '#db2777',
     '#6366f1', '#8b5cf6', '#ec4899', '#4f46e5',
@@ -614,9 +613,8 @@
   function loadSpinSession() {
     try {
       const s = JSON.parse(sessionStorage.getItem(SPIN_SESSION_KEY) || 'null');
-      if (s && s.orderId && s.phone) {
+      if (s && s.orderId) {
         spinUnlockedOrderId = String(s.orderId);
-        spinUnlockedPhone = String(s.phone);
         return true;
       }
     } catch (_) {}
@@ -624,13 +622,13 @@
   }
 
   function saveSpinSession() {
-    if (!spinUnlockedOrderId || !spinUnlockedPhone) {
+    if (!spinUnlockedOrderId) {
       sessionStorage.removeItem(SPIN_SESSION_KEY);
       return;
     }
     sessionStorage.setItem(
       SPIN_SESSION_KEY,
-      JSON.stringify({ orderId: spinUnlockedOrderId, phone: spinUnlockedPhone })
+      JSON.stringify({ orderId: spinUnlockedOrderId })
     );
   }
 
@@ -645,9 +643,7 @@
     renderSpinSection();
     if (spinPrizes.length && loadSpinSession()) {
       const oidEl = $('#spinOrderId');
-      const phEl = $('#spinPhone');
       if (oidEl) oidEl.value = spinUnlockedOrderId;
-      if (phEl) phEl.value = spinUnlockedPhone;
       await unlockSpin(true);
     }
   }
@@ -677,7 +673,7 @@
     if (hint) {
       if (spinBusy) hint.textContent = 'လှည့်နေသည်…';
       else if (!spinUnlockedOrderId) {
-        hint.textContent = 'အော်ဒါနံပါတ်နှင့် ဖုန်းထည့်ပြီး ကံစမ်းခွင့် စစ်ပါ';
+        hint.textContent = 'အော်ဒါနံပါတ် ထည့်ပြီး ကံစမ်းခွင့် စစ်ပါ';
       } else if (n < 1) {
         hint.textContent = 'ကံစမ်းခွင့် ကုန်သွားပါပြီ — Admin ထံ ဆက်သွယ်ပါ';
       } else {
@@ -803,17 +799,16 @@
 
   async function unlockSpin(silent) {
     const orderId = ($('#spinOrderId') && $('#spinOrderId').value.trim()) || spinUnlockedOrderId;
-    const phone = ($('#spinPhone') && $('#spinPhone').value.trim()) || spinUnlockedPhone;
     const msg = $('#spinUnlockMsg');
-    if (!orderId || !phone) {
-      if (msg && !silent) msg.textContent = 'အော်ဒါနံပါတ်နှင့် ဖုန်း ထည့်ပါ';
+    if (!orderId) {
+      if (msg && !silent) msg.textContent = 'အော်ဒါနံပါတ် ထည့်ပါ';
       return;
     }
     try {
       const res = await fetch('/api/spin/unlock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId, phone }),
+        body: JSON.stringify({ orderId }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -826,7 +821,6 @@
         throw new Error(data.error || 'မတွေ့ပါ');
       }
       spinUnlockedOrderId = data.orderId || orderId;
-      spinUnlockedPhone = phone;
       spinCredits = Number(data.spinCredits) || 0;
       saveSpinSession();
       if (msg) {
@@ -840,7 +834,6 @@
     } catch (err) {
       spinCredits = 0;
       spinUnlockedOrderId = '';
-      spinUnlockedPhone = '';
       saveSpinSession();
       if (msg) {
         msg.textContent = err.message || 'မရရှိနိုင်ပါ';
@@ -852,7 +845,7 @@
 
   async function doSpin() {
     if (spinBusy || !spinPrizes.length) return;
-    if (!spinUnlockedOrderId || !spinUnlockedPhone || spinCredits < 1) {
+    if (!spinUnlockedOrderId || spinCredits < 1) {
       updateSpinButton();
       toast('ကံစမ်းခွင့် မရှိပါ');
       return;
@@ -865,7 +858,6 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           orderId: spinUnlockedOrderId,
-          phone: spinUnlockedPhone,
         }),
       });
       const data = await res.json().catch(() => ({}));

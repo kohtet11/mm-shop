@@ -825,3 +825,25 @@ a.cart-btn {
   word-break: break-word;
   font-size: 0.86rem;
 }
+
+
+/* Spin special toggle */
+.badge.spin-special {
+  background: #fce7f3;
+  color: #9d174d;
+  cursor: pointer;
+  border: 1px solid #f9a8d4;
+  user-select: none;
+}
+.badge.spin-special.is-on {
+  background: #db2777;
+  color: #fff;
+  border-color: #be185d;
+}
+.badge.spin-special:hover {
+  filter: brightness(0.97);
+}
+.spin-cycle-progress {
+  font-size: 0.9rem;
+  color: var(--muted, #64748b);
+}

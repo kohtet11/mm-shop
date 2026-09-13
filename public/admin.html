@@ -70,14 +70,22 @@
           <h1 style="margin:0">စပင်ဘီး</h1>
           <button type="button" class="btn btn-primary" id="newSpinBtn">+ ဆုအသစ်</button>
         </div>
-        <p class="hint" style="margin-top:0">N = ဘယ်နှကြိမ် တစ်ခါကျ — အလေးချိန် = 1/N (normalize လုပ်ပြီး ရွေးမည်). Public API တွင် hit_every မပေါ်ပါ။</p>
+        <p class="hint" style="margin-top:0">
+          <strong>၁၅ကြိမ် စက်ဝန်း (အော်ဒါတစ်ခုချင်း)</strong> —
+          အော်ဒါတစ်ခု၏ ၁၅ကြိမ်မြောက်၊ ၃၀၊ ၄၅… စပင်သည် <em>special</em> ဆုများမှသာ ရွေးသည်။
+          အခြားကြိမ်များသည် ပုံမှန်ဆုများမှသာ။ Pool အတွင်း uniform random
+          (<code>hit_every</code> ကို ဤမုဒ်တွင် မသုံး — DB တွင် ထားသေးသည်)။
+          ဖောက်သည်တစ်ဦး၏ စပင်သည် အခြားအော်ဒါကို မထိပါ။
+        </p>
+        <p class="hint" id="spinCycleHint" style="margin-top:0.35rem">ဆုအမည်ဘေးရှိ 「၁၅ကြိမ်တွင် ၁ကြိမ်」 ကို နှိပ်၍ special အဖြစ် ဖွင့်/ပိတ်နိုင်သည်။</p>
         <div class="admin-card table-wrap">
           <table class="data" id="spinTable">
             <thead>
               <tr>
                 <th>အမည်</th>
                 <th>ပစ္စည်း</th>
-                <th>အလေးချိန်</th>
+                <th>Special</th>
+                <th>hit_every</th>
                 <th>အစဉ်</th>
                 <th>အခြေအနေ</th>
                 <th></th>
@@ -322,11 +330,16 @@
         <div class="form-group">
           <label for="spinHitEvery">ဘယ်နှကြိမ် တစ်ခါကျ (N) *</label>
           <input id="spinHitEvery" type="number" min="1" step="1" value="10" required />
-          <div class="hint">အလေးချိန် = 1/N — ဥပမာ N=10 → 1/10၊ N=5 → 1/5 (ပိုများကျ)</div>
+          <div class="hint">မှတ်ချက် — ၁၅ကြိမ် စက်ဝန်းမုဒ်တွင် hit_every ကို မသုံးပါ (pool အတွင်း uniform)။ DB အတွက်သာ ထားသည်။</div>
         </div>
         <div class="form-group">
           <label for="spinSort">အစဉ် (sort order)</label>
           <input id="spinSort" type="number" step="1" value="0" />
+        </div>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="spinSpecial" /> Special / rare — 「၁၅ကြိမ်တွင် ၁ကြိမ်」 slot
+          </label>
         </div>
         <div class="form-group">
           <label>

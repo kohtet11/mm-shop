@@ -483,6 +483,13 @@
       <h3 style="margin-bottom:0.35rem">ပစ္စည်းများ</h3>
       <ul>${itemsHtml || '<li>—</li>'}</ul>
       <h3 style="margin-bottom:0.35rem">စပင်မှတ်တမ်း</h3>
+      <p class="spin-cycle-progress hint" style="margin:0 0 0.5rem">
+        ဤအော်ဒါ၏ စက်ဝန်း — နောက်စပင်:
+        <strong>${(o.spin_cycle && o.spin_cycle.next_in_cycle) || 1}</strong>
+        / ${(o.spin_cycle && o.spin_cycle.cycle_size) || 15}
+        (စုစုပေါင်း လှည့်ပြီး: ${(o.spin_cycle && o.spin_cycle.spin_play_count) || (o.spin_plays || []).length})
+        ${(o.spin_cycle && o.spin_cycle.next_is_special) ? '— နောက်တစ်ကြိမ်သည် <strong>special</strong> slot' : ''}
+      </p>
       <ul>${playsList}</ul>
       <h3 style="margin-bottom:0.35rem">ငွေလွှဲစလစ်</h3>
       ${
@@ -716,20 +723,37 @@
   // ========== Spin prizes ==========
 
   async function loadSpinPrizes() {
-    const prizes = await api('/api/admin/spin-prizes');
+    const data = await api('/api/admin/spin-prizes');
+    const prizes = Array.isArray(data) ? data : data.prizes || [];
     loadSpinPrizes._cache = prizes;
+    loadSpinPrizes._meta = Array.isArray(data)
+      ? { cycle_size: 15, cycle_scope: 'per_order' }
+      : data;
     const tbody = $('#spinTable tbody');
     if (!tbody) return prizes;
+    const hint = $('#spinCycleHint');
+    if (hint) {
+      const size = (loadSpinPrizes._meta && loadSpinPrizes._meta.cycle_size) || 15;
+      hint.textContent =
+        'ဆုအမည်ဘေး 「၁၅ကြိမ်တွင် ၁ကြိမ်」 ကို နှိပ်၍ special ဖွင့်/ပိတ် — စက်ဝန်းသည် အော်ဒါတစ်ခုချင်း (' +
+        size +
+        ' ကြိမ်)။';
+    }
     tbody.innerHTML =
       prizes
         .map((s) => {
           const prod = s.product_name
             ? escapeHtml(s.product_name)
             : '<span class="hint">—</span>';
+          const specialOn = Number(s.is_special) === 1;
+          const specialBadge = `<span class="badge spin-special${
+            specialOn ? ' is-on' : ''
+          }" role="button" tabindex="0" title="နှိပ်၍ special ဖွင့်/ပိတ်" data-toggle-special="${s.id}">၁၅ကြိမ်တွင် ၁ကြိမ်</span>`;
           return `
       <tr>
         <td><strong>${escapeHtml(s.name)}</strong></td>
         <td>${prod}</td>
+        <td>${specialBadge}</td>
         <td><code>1/${Number(s.hit_every) || 1}</code></td>
         <td>${Number(s.sort_order) || 0}</td>
         <td>${s.active ? '<span class="badge paid_confirmed">active</span>' : '<span class="badge cancelled">inactive</span>'}</td>
@@ -739,7 +763,8 @@
         </td>
       </tr>`;
         })
-        .join('') || '<tr><td colspan="6" class="empty">ဆု မရှိသေးပါ — စတိုးတွင် စပင်ဘီး ပုန်းနေမည်</td></tr>';
+        .join('') ||
+      '<tr><td colspan="7" class="empty">ဆု မရှိသေးပါ — စတိုးတွင် စပင်ဘီး ပုန်းနေမည်</td></tr>';
     return prizes;
   }
 
@@ -802,6 +827,8 @@
     $('#spinHitEvery').value = prize ? prize.hit_every : 10;
     $('#spinSort').value = prize ? prize.sort_order : 0;
     $('#spinActive').checked = prize ? !!prize.active : true;
+    const specialEl = $('#spinSpecial');
+    if (specialEl) specialEl.checked = prize ? !!Number(prize.is_special) : false;
     await fillSpinProductOptions(prize ? prize.product_id : '');
     $('#spinModal').classList.add('open');
   }
@@ -823,6 +850,7 @@
       hit_every: Math.max(1, parseInt($('#spinHitEvery').value, 10) || 1),
       sort_order: parseInt($('#spinSort').value, 10) || 0,
       active: $('#spinActive').checked ? 1 : 0,
+      is_special: $('#spinSpecial') && $('#spinSpecial').checked ? 1 : 0,
     };
     try {
       if (id) {
@@ -845,6 +873,24 @@
   });
 
   document.addEventListener('click', async (e) => {
+    const toggle = e.target.closest('[data-toggle-special]');
+    if (toggle) {
+      const id = Number(toggle.dataset.toggleSpecial);
+      const prize = (loadSpinPrizes._cache || []).find((s) => s.id === id);
+      if (!prize) return;
+      const next = Number(prize.is_special) === 1 ? 0 : 1;
+      try {
+        await api('/api/admin/spin-prizes/' + id, {
+          method: 'PUT',
+          body: JSON.stringify({ is_special: next }),
+        });
+        toast(next ? 'Special ဖွင့်ပြီး (၁၅ကြိမ်တွင် ၁ကြိမ်)' : 'Special ပိတ်ပြီး');
+        await loadSpinPrizes();
+      } catch (err) {
+        toast(err.message);
+      }
+      return;
+    }
     const edit = e.target.closest('[data-edit-spin]');
     if (edit) {
       const id = Number(edit.dataset.editSpin);
