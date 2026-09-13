@@ -458,6 +458,14 @@
     const grid = $('#productsGrid');
     if (!grid) return;
     syncCategoryChips();
+    renderSpinSection();
+    const searchBox = $('#productSearchBox');
+    if (searchBox) searchBox.hidden = productCategory === 'spin_game';
+    // Spin wheel category: spin UI is the page content; keep product grid empty
+    if (productCategory === 'spin_game') {
+      grid.innerHTML = '';
+      return;
+    }
     if (!products.length) {
       grid.innerHTML = '<div class="empty">ပစ္စည်း မရှိသေးပါ</div>';
       return;
@@ -920,8 +928,10 @@
   function renderSpinSection() {
     const section = $('#spinSection');
     if (!section) return;
-    const show = !!(spinPrizes.length || spinBuyProduct);
-    if (!show) {
+    // Spin UI lives under Spin wheel category only — never on home / other chips
+    const onSpinCat = productCategory === 'spin_game';
+    const hasContent = !!(spinPrizes.length || spinBuyProduct);
+    if (!onSpinCat || !hasContent) {
       section.hidden = true;
       return;
     }
@@ -1354,6 +1364,8 @@
       closeOverlay('spinPurchaseOverlay');
       const unlockOid = $('#spinOrderId');
       if (unlockOid && oid) unlockOid.value = oid;
+      productCategory = 'spin_game';
+      renderProducts();
       const section = $('#spinSection');
       if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
       if (oid) await unlockSpin(false);
