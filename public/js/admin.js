@@ -34,6 +34,97 @@
     return path.startsWith('/') ? path : '/uploads/' + path;
   }
 
+  /** Center-crop image File to target W:H ratio via canvas (JPEG). */
+  function cropImageToRatio(file, ratioW, ratioH, maxEdge = 1600) {
+    return new Promise((resolve, reject) => {
+      if (!file || !/^image\//.test(file.type || '')) {
+        reject(new Error('ပုံဖိုင် မဟုတ်ပါ'));
+        return;
+      }
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        try {
+          const srcW = img.naturalWidth || img.width;
+          const srcH = img.naturalHeight || img.height;
+          if (!srcW || !srcH) throw new Error('ပုံဖတ်မရပါ');
+          const targetRatio = ratioW / ratioH;
+          const srcRatio = srcW / srcH;
+          let sx = 0;
+          let sy = 0;
+          let sw = srcW;
+          let sh = srcH;
+          if (srcRatio > targetRatio) {
+            sw = Math.round(srcH * targetRatio);
+            sx = Math.round((srcW - sw) / 2);
+          } else if (srcRatio < targetRatio) {
+            sh = Math.round(srcW / targetRatio);
+            sy = Math.round((srcH - sh) / 2);
+          }
+          let outW = sw;
+          let outH = sh;
+          const longEdge = Math.max(outW, outH);
+          if (longEdge > maxEdge) {
+            const scale = maxEdge / longEdge;
+            outW = Math.max(1, Math.round(outW * scale));
+            outH = Math.max(1, Math.round(outH * scale));
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = outW;
+          canvas.height = outH;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+          const base = String(file.name || 'image').replace(/\.[^.]+$/, '') || 'image';
+          canvas.toBlob(
+            (blob) => {
+              if (!blob) {
+                reject(new Error('ပုံ crop မရပါ'));
+                return;
+              }
+              resolve(new File([blob], base + '.jpg', { type: 'image/jpeg' }));
+            },
+            'image/jpeg',
+            0.9
+          );
+        } catch (err) {
+          reject(err);
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('ပုံဖွင့်မရပါ'));
+      };
+      img.src = url;
+    });
+  }
+
+  function setFramePreview(imgSel, emptySel, src) {
+    const img = $(imgSel);
+    const empty = $(emptySel);
+    if (!img) return;
+    if (src) {
+      img.src = src;
+      img.classList.remove('hidden');
+      if (empty) empty.classList.add('hidden');
+    } else {
+      img.removeAttribute('src');
+      img.classList.add('hidden');
+      if (empty) empty.classList.remove('hidden');
+    }
+  }
+
+  let pendingProductImageFile = null;
+  let pendingProductPreviewUrl = null;
+
+  function clearPendingProductImage() {
+    pendingProductImageFile = null;
+    if (pendingProductPreviewUrl) {
+      URL.revokeObjectURL(pendingProductPreviewUrl);
+      pendingProductPreviewUrl = null;
+    }
+  }
+
   async function api(url, opts = {}) {
     const res = await fetch(url, {
       credentials: 'same-origin',
@@ -549,9 +640,12 @@
       discSel.value = pct;
     }
     $('#pImage').value = '';
+    clearPendingProductImage();
+    const existingSrc = product && product.image_path ? imgUrl(product.image_path) : '';
+    setFramePreview('#pImagePreview', '#pImagePreviewEmpty', existingSrc);
     $('#pImageHint').textContent = product && product.image_path
-      ? 'လက်ရှိပုံ: ' + product.image_path
-      : '';
+      ? 'လက်ရှိပုံ: ' + product.image_path + ' · ကုန်ပုံ 1:1 အကြံပြု'
+      : 'ကုန်ပုံ 1:1 အကြံပြု';
     syncProductCategoryDependentFields(product);
     $('#productModal').classList.add('open');
   }
@@ -650,6 +744,38 @@
     if (e.target === $('#productModal')) $('#productModal').classList.remove('open');
   });
 
+  const pImageInput = $('#pImage');
+  if (pImageInput) {
+    pImageInput.addEventListener('change', async () => {
+      const file = pImageInput.files && pImageInput.files[0];
+      clearPendingProductImage();
+      if (!file) {
+        const cur = openProductModal._current;
+        setFramePreview(
+          '#pImagePreview',
+          '#pImagePreviewEmpty',
+          cur && cur.image_path ? imgUrl(cur.image_path) : ''
+        );
+        return;
+      }
+      if (!/^image\//.test(file.type || '')) {
+        toast('ပုံဖိုင်သာ တင်နိုင်သည်');
+        pImageInput.value = '';
+        return;
+      }
+      try {
+        pendingProductImageFile = await cropImageToRatio(file, 1, 1);
+        pendingProductPreviewUrl = URL.createObjectURL(pendingProductImageFile);
+        setFramePreview('#pImagePreview', '#pImagePreviewEmpty', pendingProductPreviewUrl);
+        $('#pImageHint').textContent = '1:1 center-crop ပြီး — သိမ်းမှ upload လုပ်မည်';
+      } catch (err) {
+        toast(err.message || 'ပုံပြင်မရပါ');
+        pImageInput.value = '';
+        pendingProductImageFile = null;
+      }
+    });
+  }
+
   $('#productForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const id = $('#productId').value;
@@ -679,7 +805,16 @@
     fd.append('active', $('#pActive').checked ? '1' : '0');
     fd.append('on_banner', $('#pOnBanner').checked ? '1' : '0');
     fd.append('discount_percent', $('#pDiscount') ? $('#pDiscount').value : '0');
-    if ($('#pImage').files[0]) fd.append('image', $('#pImage').files[0]);
+    if (pendingProductImageFile) {
+      fd.append('image', pendingProductImageFile);
+    } else if ($('#pImage').files[0]) {
+      try {
+        const cropped = await cropImageToRatio($('#pImage').files[0], 1, 1);
+        fd.append('image', cropped);
+      } catch (_) {
+        fd.append('image', $('#pImage').files[0]);
+      }
+    }
 
     try {
       let saved = null;
@@ -704,6 +839,8 @@
           return data;
         });
       }
+      clearPendingProductImage();
+      $('#pImage').value = '';
       $('#productModal').classList.remove('open');
       toast('သိမ်းပြီးပါပြီ');
       await loadProducts();
@@ -1151,7 +1288,7 @@
           const active = !!Number(b.active);
           return `
       <tr>
-        <td>${b.image_path || b.image_url ? `<img class="thumb-sm" src="${imgUrl(b.image_url || b.image_path)}" alt="" />` : '—'}</td>
+        <td>${b.image_path || b.image_url ? `<img class="thumb-sm-banner" src="${imgUrl(b.image_url || b.image_path)}" alt="" />` : '—'}</td>
         <td>${Number(b.sort_order) || 0}</td>
         <td>${active ? '<span class="badge paid_confirmed">active</span>' : '<span class="badge cancelled">inactive</span>'}</td>
         <td class="row-actions">
@@ -1170,17 +1307,33 @@
       toast('ပုံဖိုင်သာ တင်နိုင်သည်');
       return;
     }
+    let cropped = file;
+    try {
+      cropped = await cropImageToRatio(file, 16, 9);
+    } catch (_) {
+      cropped = file;
+    }
+    const previewUrl = URL.createObjectURL(cropped);
+    setFramePreview('#bannerImagePreview', '#bannerImagePreviewEmpty', previewUrl);
     const fd = new FormData();
-    fd.append('image', file);
+    fd.append('image', cropped);
     const res = await fetch('/api/admin/banner-slides', {
       method: 'POST',
       credentials: 'same-origin',
       body: fd,
     });
     const data = await res.json().catch(() => ({}));
+    URL.revokeObjectURL(previewUrl);
     if (!res.ok) throw new Error(data.error || 'Banner တင်မရပါ');
+    if (data.image_path || data.image_url) {
+      setFramePreview(
+        '#bannerImagePreview',
+        '#bannerImagePreviewEmpty',
+        imgUrl(data.image_url || data.image_path)
+      );
+    }
     await loadBannerSlides();
-    toast('Banner သိမ်းပြီး');
+    toast('Banner သိမ်းပြီး (16:9)');
   }
 
   const newBannerBtn = $('#newBannerBtn');

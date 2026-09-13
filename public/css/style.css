@@ -222,16 +222,17 @@ img { max-width: 100%; display: block; }
 }
 .product-card .thumb-wrap {
   position: relative;
-  aspect-ratio: 1;
+  aspect-ratio: 1 / 1;
   background: #f1f5f9;
+  overflow: hidden;
 }
 .product-card .thumb {
-  aspect-ratio: 1;
-  background: #f1f5f9;
-  object-fit: cover;
   width: 100%;
   height: 100%;
   display: block;
+  object-fit: cover;
+  object-position: center;
+  background: #f1f5f9;
 }
 .auth-badge {
   display: inline-block;
@@ -315,7 +316,7 @@ img { max-width: 100%; display: block; }
 .promo-media {
   position: relative;
   width: 100%;
-  aspect-ratio: 16 / 7;
+  aspect-ratio: 16 / 9;
   background: #111827;
   overflow: hidden;
 }
@@ -345,6 +346,7 @@ img { max-width: 100%; display: block; }
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center;
   display: block;
   transition: transform 0.45s ease;
 }
@@ -410,7 +412,6 @@ img { max-width: 100%; display: block; }
 }
 .promo-dot.active { background: #fff; width: 1.1rem; }
 @media (max-width: 640px) {
-  .promo-media { aspect-ratio: 16 / 9; }
   .promo-meta { flex-direction: column; align-items: flex-start; }
   .promo-dots { bottom: 4.4rem; }
 }
@@ -490,7 +491,9 @@ img { max-width: 100%; display: block; }
 .cart-item img {
   width: 64px;
   height: 64px;
+  aspect-ratio: 1 / 1;
   object-fit: cover;
+  object-position: center;
   border-radius: 10px;
   background: #f1f5f9;
 }
@@ -667,9 +670,61 @@ table.data th { color: var(--muted); font-weight: 600; }
 .thumb-sm {
   width: 48px;
   height: 48px;
+  aspect-ratio: 1 / 1;
   object-fit: cover;
+  object-position: center;
   border-radius: 8px;
   background: #f1f5f9;
+  display: block;
+}
+.thumb-sm-banner {
+  width: 96px;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  object-position: center;
+  border-radius: 8px;
+  background: #f1f5f9;
+  display: block;
+}
+
+/* Admin upload frame previews (match storefront ratios) */
+.frame-preview {
+  margin-top: 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #f1f5f9;
+  position: relative;
+}
+.frame-preview img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  object-position: center;
+}
+.frame-preview-square {
+  width: min(220px, 100%);
+  aspect-ratio: 1 / 1;
+}
+.frame-preview-banner {
+  width: min(420px, 100%);
+  aspect-ratio: 16 / 9;
+}
+.frame-preview-empty {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding: 0.75rem;
+  min-height: 100%;
+  text-align: center;
+}
+.frame-hint {
+  margin-top: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--muted);
 }
 .login-wrap {
   min-height: 100vh;

@@ -258,6 +258,11 @@
             စတိုး promo carousel တွင် Game slide နှင့် product banner များနှင့်အတူ ပြမည့် ကြေငြာပုံများ။
             ပုံသီးသန့်သာ — နှိပ်လျှင် action မရှိပါ။
           </p>
+          <div class="frame-hint">Banner 16:9 အကြံပြု — တင်မီ center-crop လုပ်မည်</div>
+          <div id="bannerImagePreviewWrap" class="frame-preview frame-preview-banner" style="margin-bottom:0.85rem">
+            <div class="frame-preview-empty" id="bannerImagePreviewEmpty">Banner preview (16:9)</div>
+            <img id="bannerImagePreview" class="hidden" alt="banner preview" />
+          </div>
           <div class="admin-card table-wrap" style="padding:0;box-shadow:none;border:1px solid var(--border, #e5e7eb)">
             <table class="data" id="bannerSlidesTable">
               <thead>
@@ -345,6 +350,11 @@
         <div class="form-group">
           <label for="pImage">ပုံ</label>
           <input id="pImage" type="file" accept="image/*" />
+          <div class="frame-hint">ကုန်ပုံ 1:1 အကြံပြု — စတိုးတွင် စတုရန်း frame ဖြင့် ပြမည်</div>
+          <div id="pImagePreviewWrap" class="frame-preview frame-preview-square">
+            <div class="frame-preview-empty" id="pImagePreviewEmpty">ပုံရွေးပါ / Preview</div>
+            <img id="pImagePreview" class="hidden" alt="product preview" />
+          </div>
           <div class="hint" id="pImageHint"></div>
         </div>
         <div class="form-group">
