@@ -558,11 +558,21 @@ function getOrderSpinCycleProgress(database, orderId) {
   };
 }
 
+
 function clampDiscountPercent(value) {
   const n = parseInt(value, 10);
   if (!Number.isFinite(n) || n <= 0) return 0;
   return Math.min(90, n);
 }
+
+/** List price (price_mmk) minus % OFF → amount actually charged. */
+function effectiveSalePriceMmk(listPrice, discountPercent) {
+  const list = Math.max(0, parseInt(listPrice, 10) || 0);
+  const pct = clampDiscountPercent(discountPercent);
+  if (pct <= 0) return list;
+  return Math.max(0, Math.round(list * (1 - pct / 100)));
+}
+
 
 function parseOnBanner(value, fallback = 0) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -1260,13 +1270,15 @@ app.post('/api/orders', (req, res) => {
               err.status = 400;
               throw err;
             }
-            total += product.price_mmk * qty;
+            const pct = clampDiscountPercent(product.discount_percent);
+            const unitSale = effectiveSalePriceMmk(product.price_mmk, pct);
+            total += unitSale * qty;
             lineItems.push({
               product_id: product.id,
               product_name: product.name,
-              unit_price_mmk: product.price_mmk,
+              unit_price_mmk: unitSale,
               cost_mmk: Number(product.cost_mmk) || 0,
-              discount_percent: clampDiscountPercent(product.discount_percent),
+              discount_percent: pct,
               quantity: qty,
             });
           }
@@ -1676,7 +1688,9 @@ app.post('/api/spin/purchase', (req, res) => {
             e.status = 400;
             throw e;
           }
-          const total = fresh.price_mmk * qty;
+          const pct = clampDiscountPercent(fresh.discount_percent);
+          const unitSale = effectiveSalePriceMmk(fresh.price_mmk, pct);
+          const total = unitSale * qty;
           db.prepare(
             `INSERT INTO orders (order_id, customer_name, phone, address, notes, total_mmk, status, slip_path)
              VALUES (?, ?, ?, ?, '', ?, 'pending', ?)`
@@ -1688,9 +1702,9 @@ app.post('/api/spin/purchase', (req, res) => {
             orderId,
             fresh.id,
             fresh.name,
-            fresh.price_mmk,
+            unitSale,
             Number(fresh.cost_mmk) || 0,
-            clampDiscountPercent(fresh.discount_percent),
+            pct,
             qty
           );
           return { orderId, total_mmk: total, quantity: qty };

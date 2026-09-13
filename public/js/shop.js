@@ -325,9 +325,31 @@
     products = Array.isArray(list)
       ? list.filter((p) => !Number(p && p.is_spin_credit))
       : [];
+    syncCartPricesFromProducts();
     await fetchBannerSlides();
     renderPromoCarousel();
     renderProducts();
+  }
+
+  function syncCartPricesFromProducts() {
+    if (!cart.length || !products.length) return;
+    let changed = false;
+    for (const item of cart) {
+      const p = products.find((x) => x.id === item.product_id);
+      if (!p) continue;
+      const { sale, pct, original } = salePriceParts(p);
+      if (
+        Number(item.price_mmk) !== sale ||
+        Number(item.discount_percent) !== pct ||
+        Number(item.list_price_mmk) !== original
+      ) {
+        item.price_mmk = sale;
+        item.discount_percent = pct;
+        item.list_price_mmk = original;
+        changed = true;
+      }
+    }
+    if (changed) saveCart();
   }
 
   function applyBranding(s) {
@@ -369,11 +391,12 @@
 
   function salePriceParts(p) {
     const pct = Number(p.discount_percent) || 0;
-    const sale = Number(p.price_mmk) || 0;
+    const original = Number(p.price_mmk) || 0;
     if (pct <= 0 || pct >= 100) {
-      return { pct: 0, sale, original: sale };
+      return { pct: 0, sale: original, original };
     }
-    const original = Math.round(sale / (1 - pct / 100));
+    // ရောင်းဈေး (price_mmk) ထဲကနေ % လျှော့ → လက်ခံ/ပေးရမည့်ဈေး
+    const sale = Math.max(0, Math.round(original * (1 - pct / 100)));
     return { pct, sale, original };
   }
 
@@ -633,12 +656,19 @@
       toast('စတော့ မလောက်ပါ (ကျန် ' + stock + ')');
       return;
     }
-    if (existing) existing.quantity = nextQty;
-    else {
+    const { sale, pct } = salePriceParts(p);
+    if (existing) {
+      existing.quantity = nextQty;
+      existing.price_mmk = sale;
+      existing.list_price_mmk = Number(p.price_mmk) || sale;
+      existing.discount_percent = pct;
+    } else {
       cart.push({
         product_id: p.id,
         name: p.name,
-        price_mmk: p.price_mmk,
+        price_mmk: sale,
+        list_price_mmk: Number(p.price_mmk) || sale,
+        discount_percent: pct,
         image_path: p.image_path,
         is_spin_credit: productIsSpinCredit(p) ? 1 : 0,
         quantity: 1,
@@ -704,6 +734,36 @@
     if (group) group.classList.remove('spin-optional');
   }
 
+
+  function cartUnitPriceHtml(i) {
+    const pct = Number(i.discount_percent) || 0;
+    const sale = Number(i.price_mmk) || 0;
+    const list = Number(i.list_price_mmk) || sale;
+    if (pct <= 0 || list <= sale) return formatMMK(sale);
+    return (
+      '<span class="price-original">' +
+      formatMMK(list) +
+      '</span> <span class="price-sale">' +
+      formatMMK(sale) +
+      '</span>'
+    );
+  }
+
+  function cartLineTotalHtml(i) {
+    const pct = Number(i.discount_percent) || 0;
+    const sale = Number(i.price_mmk) || 0;
+    const list = Number(i.list_price_mmk) || sale;
+    const qty = Number(i.quantity) || 0;
+    if (pct <= 0 || list <= sale) return formatMMK(sale * qty);
+    return (
+      '<span class="price-original">' +
+      formatMMK(list * qty) +
+      '</span> <span class="price-sale">' +
+      formatMMK(sale * qty) +
+      '</span>'
+    );
+  }
+
   function renderCart() {
     const list = $('#cartList');
     if (!cart.length) {
@@ -718,7 +778,7 @@
           <img src="${imgUrl(i.image_path)}" alt="" />
           <div>
             <strong>${escapeHtml(i.name)}</strong>
-            <div class="hint">${formatMMK(i.price_mmk)}</div>
+            <div class="hint">${cartUnitPriceHtml(i)}</div>
             <div class="qty-row">
               <button type="button" data-dec="${i.product_id}">−</button>
               <span>${i.quantity}</span>
@@ -726,7 +786,7 @@
             </div>
           </div>
           <div>
-            <div>${formatMMK(i.price_mmk * i.quantity)}</div>
+            <div>${cartLineTotalHtml(i)}</div>
             <button type="button" class="btn btn-sm btn-outline" data-remove="${i.product_id}" style="margin-top:0.4rem">ဖယ်မည်</button>
           </div>
         </div>`
