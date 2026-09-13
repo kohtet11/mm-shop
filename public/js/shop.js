@@ -366,6 +366,26 @@
     return `<span class="auth-badge custom">${escapeHtml(raw)}</span>`;
   }
 
+
+  function salePriceParts(p) {
+    const pct = Number(p.discount_percent) || 0;
+    const sale = Number(p.price_mmk) || 0;
+    if (pct <= 0 || pct >= 100) {
+      return { pct: 0, sale, original: sale };
+    }
+    const original = Math.round(sale / (1 - pct / 100));
+    return { pct, sale, original };
+  }
+
+  function productPriceHtml(p, asSpan) {
+    const { pct, sale, original } = salePriceParts(p);
+    const Tag = asSpan ? 'span' : 'div';
+    if (pct <= 0) {
+      return `<${Tag} class="price">${formatMMK(sale)}</${Tag}>`;
+    }
+    return `<${Tag} class="price price-sale-wrap"><span class="price-original">${formatMMK(original)}</span><span class="price-sale">${formatMMK(sale)}</span></${Tag}>`;
+  }
+
   function discountBadgeHtml(pct) {
     const n = Number(pct) || 0;
     if (n <= 0) return '';
@@ -424,7 +444,7 @@
         </div>
         <div class="promo-meta">
           <strong>${escapeHtml(p.name)}</strong>
-          <span class="price">${formatMMK(p.price_mmk)}</span>
+          ${productPriceHtml(p, true)}
         </div>
       </button>`
       )
@@ -579,7 +599,7 @@
         <div class="body">
           <h3>${escapeHtml(p.name)}</h3>
           <div class="desc">${escapeHtml(p.description || '')}</div>
-          <div class="price">${formatMMK(p.price_mmk)}</div>
+          ${productPriceHtml(p, false)}
           <div class="actions">
             <button type="button" class="btn btn-primary" data-add="${p.id}" ${
               out ? 'disabled aria-disabled="true"' : ''
