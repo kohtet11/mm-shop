@@ -315,6 +315,19 @@
     return `<span class="discount-badge">${n}% OFF</span>`;
   }
 
+  function gamePromoSlideHtml(active) {
+    return `
+      <button type="button" class="promo-slide promo-slide-game${active ? ' active' : ''}" data-promo-category="spin_game" aria-label="Game — စပင်ဘီး ကံစမ်းမည်">
+        <div class="promo-media">
+          <img src="/assets/samples/spin-wheel-banner.svg" alt="Game spin wheel" loading="lazy" />
+        </div>
+        <div class="promo-meta">
+          <strong>Game — စပင်ဘီး ကံစမ်းမည်</strong>
+          <span class="price">Play now</span>
+        </div>
+      </button>`;
+  }
+
   function renderPromoCarousel() {
     const wrap = $('#promoCarousel');
     const track = $('#promoTrack');
@@ -322,25 +335,21 @@
     if (!wrap || !track || !dots) return;
 
     stopPromoTimer();
-    const slides = products.filter((p) => Number(p.on_banner) === 1);
-    if (!slides.length) {
-      wrap.hidden = true;
-      wrap.classList.remove('ready');
-      track.innerHTML = '';
-      dots.innerHTML = '';
-      return;
-    }
+    const productSlides = products.filter((p) => Number(p.on_banner) === 1);
+    // Built-in Game slide is always available on home, merged with discount/banner products
+    const totalSlides = 1 + productSlides.length;
 
     wrap.hidden = false;
     wrap.classList.add('ready');
     promoIndex = 0;
 
-    track.innerHTML = slides
+    const productHtml = productSlides
       .map(
-        (p, i) => `
-      <button type="button" class="promo-slide${i === 0 ? ' active' : ''}" data-promo-product="${p.id}" aria-label="${escapeHtml(p.name)}">
+        (p) => `
+      <button type="button" class="promo-slide" data-promo-product="${p.id}" aria-label="${escapeHtml(p.name)}">
         <div class="promo-media">
           <img src="${imgUrl(p.image_path)}" alt="${escapeHtml(p.name)}" loading="lazy" />
+          ${authenticityBadgeHtml(p)}
           ${discountBadgeHtml(p.discount_percent)}
         </div>
         <div class="promo-meta">
@@ -351,19 +360,26 @@
       )
       .join('');
 
-    dots.innerHTML = slides
-      .map(
-        (_, i) =>
-          `<button type="button" class="promo-dot${i === 0 ? ' active' : ''}" data-promo-dot="${i}" aria-label="slide ${i + 1}"></button>`
-      )
-      .join('');
+    track.innerHTML = gamePromoSlideHtml(true) + productHtml;
+
+    dots.innerHTML = Array.from({ length: totalSlides }, (_, i) =>
+      `<button type="button" class="promo-dot${i === 0 ? ' active' : ''}" data-promo-dot="${i}" aria-label="slide ${i + 1}"></button>`
+    ).join('');
 
     showPromoSlide(0);
-    if (slides.length > 1) startPromoTimer();
+    if (totalSlides > 1) startPromoTimer();
   }
 
   function bannerSlides() {
     return products.filter((p) => Number(p.on_banner) === 1);
+  }
+
+  function openGameCategoryFromPromo() {
+    productCategory = 'spin_game';
+    syncCategoryChips();
+    renderProducts();
+    const section = $('#spinSection');
+    if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   function showPromoSlide(idx) {
@@ -676,6 +692,11 @@
       productCategory = catBtn.dataset.category || 'all';
       syncCategoryChips();
       renderProducts();
+      return;
+    }
+    const promoGame = e.target.closest('[data-promo-category]');
+    if (promoGame) {
+      openGameCategoryFromPromo();
       return;
     }
     const promoSlide = e.target.closest('[data-promo-product]');
