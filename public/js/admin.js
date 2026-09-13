@@ -70,6 +70,8 @@
     loadSpinWins().catch(() => {});
     loadOrders();
     loadSettings();
+    loadChatThreads().catch(() => {});
+    startChatBadgePoll();
   }
 
   $('#loginForm').addEventListener('submit', async (e) => {
@@ -88,6 +90,8 @@
 
   $('#logoutBtn').addEventListener('click', async () => {
     await api('/api/admin/logout', { method: 'POST', body: '{}' });
+    stopChatPolling();
+    stopChatBadgePoll();
     showLogin();
   });
 
@@ -99,6 +103,8 @@
       $$('.admin-nav [data-tab]').forEach((x) => x.classList.toggle('active', x === a));
       $$('.tab-panel').forEach((p) => p.classList.add('hidden'));
       $('#tab-' + tab).classList.remove('hidden');
+      if (tab === 'chat') startChatPolling();
+      else stopChatPolling();
     });
   });
 
@@ -912,6 +918,291 @@
         toast(err.message);
       }
     }
+  });
+
+
+  // Customer chat
+  const CHAT_SEEN_KEY = 'mm_admin_chat_seen';
+  let chatPollTimer = null;
+  let chatBadgeTimer = null;
+  let activeChatId = null;
+  let chatThreadsCache = [];
+  let chatSending = false;
+
+  function loadChatSeen() {
+    try {
+      return JSON.parse(localStorage.getItem(CHAT_SEEN_KEY) || '{}') || {};
+    } catch {
+      return {};
+    }
+  }
+
+  function markChatSeen(id, updatedAt) {
+    const seen = loadChatSeen();
+    seen[String(id)] = String(updatedAt || '');
+    localStorage.setItem(CHAT_SEEN_KEY, JSON.stringify(seen));
+  }
+
+  function isChatUnread(thread) {
+    const seen = loadChatSeen();
+    const last = String(thread.updated_at || '');
+    const prev = seen[String(thread.id)] || '';
+    if (thread.needs_reply) return true;
+    return !!(last && last !== prev);
+  }
+
+  function formatChatWhen(isoOrSql) {
+    if (!isoOrSql) return '';
+    const raw = String(isoOrSql);
+    const d = new Date(raw.includes('T') ? raw : raw.replace(' ', 'T') + 'Z');
+    if (Number.isNaN(d.getTime())) return raw;
+    try {
+      return d.toLocaleString('en-GB', {
+        timeZone: 'Asia/Yangon',
+        hour12: false,
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return raw;
+    }
+  }
+
+  function updateChatBadge(threads) {
+    const badge = $('#chatNavBadge');
+    if (!badge) return;
+    const n = (threads || []).filter((t) => t.needs_reply || isChatUnread(t)).length;
+    if (n) {
+      badge.textContent = n > 9 ? '9+' : String(n);
+      badge.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+    }
+  }
+
+  function renderChatThreadList(threads) {
+    const list = $('#chatThreadList');
+    if (!list) return;
+    if (!threads.length) {
+      list.innerHTML = '<div class="empty hint">ချတ် မရှိသေးပါ</div>';
+      return;
+    }
+    list.innerHTML = threads
+      .map((t) => {
+        const unread = isChatUnread(t);
+        const cls = [
+          'chat-thread-item',
+          Number(activeChatId) === Number(t.id) ? 'active' : '',
+          t.needs_reply || unread ? 'needs-reply' : '',
+        ]
+          .filter(Boolean)
+          .join(' ');
+        const preview = t.last_body
+          ? (t.last_sender === 'admin' ? 'သင်: ' : '') + t.last_body
+          : 'မက်ဆေ့ချ် မရှိသေးပါ';
+        return `
+        <button type="button" class="${cls}" data-open-chat="${t.id}">
+          <div class="who">${escapeHtml(t.customer_name || 'ဖောက်သည်')} ${
+            t.status === 'closed' ? '<span class="badge cancelled">ပိတ်</span>' : ''
+          }${t.needs_reply ? ' <span class="badge pending">အသစ်</span>' : ''}</div>
+          <div class="preview">${escapeHtml(t.customer_phone || '')}${
+            t.order_id ? ' · ' + escapeHtml(t.order_id) : ''
+          }</div>
+          <div class="preview">${escapeHtml(preview)}</div>
+          <div class="when">${escapeHtml(formatChatWhen(t.updated_at))}</div>
+        </button>`;
+      })
+      .join('');
+  }
+
+  async function loadChatThreads() {
+    const threads = await api('/api/admin/chat/threads');
+    chatThreadsCache = Array.isArray(threads) ? threads : [];
+    renderChatThreadList(chatThreadsCache);
+    updateChatBadge(chatThreadsCache);
+    return chatThreadsCache;
+  }
+
+  function chatMessagesHtml(thread, msgs) {
+    if (!msgs.length) return '<div class="empty hint">မက်ဆေ့ချ် မရှိသေးပါ</div>';
+    return msgs
+      .map((m) => {
+        const who = m.sender === 'admin' ? 'သင်' : escapeHtml(thread.customer_name || 'ဖောက်သည်');
+        return `<div class="admin-chat-msg ${escapeHtml(m.sender)}">
+          <div class="bubble">${escapeHtml(m.body)}</div>
+          <div class="when">${who} · ${escapeHtml(formatChatWhen(m.created_at))}</div>
+        </div>`;
+      })
+      .join('');
+  }
+
+  function bindAdminChatActions(thread) {
+    const form = $('#adminChatForm');
+    if (form && !form.dataset.bound) {
+      form.dataset.bound = '1';
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (chatSending) return;
+        const bodyEl = $('#adminChatBody');
+        const body = bodyEl ? bodyEl.value.trim() : '';
+        if (!body) return;
+        chatSending = true;
+        if ($('#adminChatSendBtn')) $('#adminChatSendBtn').disabled = true;
+        try {
+          await api('/api/admin/chat/threads/' + activeChatId + '/messages', {
+            method: 'POST',
+            body: JSON.stringify({ body }),
+          });
+          if (bodyEl) bodyEl.value = '';
+          await loadChatThreads();
+          await openChatThread(activeChatId, { silent: true });
+        } catch (err) {
+          toast(err.message);
+        } finally {
+          chatSending = false;
+          if ($('#adminChatSendBtn')) $('#adminChatSendBtn').disabled = false;
+        }
+      });
+    }
+    const closeBtn = $('#adminChatCloseBtn');
+    if (closeBtn && !closeBtn.dataset.bound) {
+      closeBtn.dataset.bound = '1';
+      closeBtn.addEventListener('click', async () => {
+        try {
+          const current = (chatThreadsCache.find((x) => Number(x.id) === Number(activeChatId)) || thread || {});
+          const next = current.status === 'closed' ? 'open' : 'closed';
+          await api('/api/admin/chat/threads/' + activeChatId, {
+            method: 'PATCH',
+            body: JSON.stringify({ status: next }),
+          });
+          toast(next === 'closed' ? 'ချတ် ပိတ်ပြီး' : 'ချတ် ပြန်ဖွင့်ပြီး');
+          await loadChatThreads();
+          await openChatThread(activeChatId, { force: true });
+        } catch (err) {
+          toast(err.message);
+        }
+      });
+    }
+  }
+
+  async function openChatThread(id, opts = {}) {
+    activeChatId = Number(id);
+    const pane = $('#chatThreadPane');
+    const keepDraft = !opts.force && $('#adminChatBody');
+    if (!keepDraft && !opts.silent) {
+      pane.innerHTML = '<div class="empty">ဖတ်နေသည်…</div>';
+    }
+    const data = await api('/api/admin/chat/threads/' + id + '/messages');
+    const thread = data.thread || {};
+    markChatSeen(thread.id, thread.updated_at);
+    renderChatThreadList(chatThreadsCache);
+    updateChatBadge(chatThreadsCache);
+    const msgs = Array.isArray(data.messages) ? data.messages : [];
+    const msgHtml = chatMessagesHtml(thread, msgs);
+    const existingMsgs = $('#adminChatMsgs');
+    if (keepDraft && existingMsgs && Number(pane.dataset.threadId) === Number(thread.id)) {
+      const head = pane.querySelector('.chat-admin-head .hint');
+      if (head) {
+        head.textContent =
+          'ဖုန်း: ' +
+          (thread.customer_phone || '') +
+          (thread.order_id ? ' · အော်ဒါ: ' + thread.order_id : '') +
+          ' · ' +
+          (thread.status === 'closed' ? 'ပိတ်ထားသည်' : 'ဖွင့်ထားသည်');
+      }
+      const who = pane.querySelector('.chat-admin-head .who');
+      if (who) who.textContent = thread.customer_name || '';
+      const closeBtn = $('#adminChatCloseBtn');
+      if (closeBtn) closeBtn.textContent = thread.status === 'closed' ? 'ပြန်ဖွင့်မည်' : 'ချတ် ပိတ်မည်';
+      if (existingMsgs.dataset.sig !== msgHtml.length + ':' + msgs.map((m) => m.id).join(',')) {
+        const atBottom = existingMsgs.scrollHeight - existingMsgs.scrollTop - existingMsgs.clientHeight < 40;
+        existingMsgs.innerHTML = msgHtml;
+        existingMsgs.dataset.sig = msgHtml.length + ':' + msgs.map((m) => m.id).join(',');
+        if (atBottom) existingMsgs.scrollTop = existingMsgs.scrollHeight;
+      }
+      bindAdminChatActions(thread);
+      return;
+    }
+    pane.dataset.threadId = String(thread.id);
+    pane.innerHTML = `
+      <div class="chat-admin-head">
+        <div class="who">${escapeHtml(thread.customer_name || '')}</div>
+        <div class="hint">ဖုန်း: ${escapeHtml(thread.customer_phone || '')}${
+          thread.order_id ? ' · အော်ဒါ: ' + escapeHtml(thread.order_id) : ''
+        } · ${thread.status === 'closed' ? 'ပိတ်ထားသည်' : 'ဖွင့်ထားသည်'}</div>
+      </div>
+      <div class="chat-admin-msgs" id="adminChatMsgs">${msgHtml}</div>
+      <form class="chat-admin-compose" id="adminChatForm">
+        <textarea id="adminChatBody" required maxlength="2000" placeholder="ပြန်စာ ရိုက်ပါ…"></textarea>
+        <div class="row-actions" style="justify-content:flex-end">
+          <button type="button" class="btn btn-outline btn-sm" id="adminChatCloseBtn">${
+            thread.status === 'closed' ? 'ပြန်ဖွင့်မည်' : 'ချတ် ပိတ်မည်'
+          }</button>
+          <button type="submit" class="btn btn-primary btn-sm" id="adminChatSendBtn">မက်ဆေ့ချ် ပို့မည်</button>
+        </div>
+      </form>`;
+    const box = $('#adminChatMsgs');
+    if (box) {
+      box.dataset.sig = msgHtml.length + ':' + msgs.map((m) => m.id).join(',');
+      box.scrollTop = box.scrollHeight;
+    }
+    bindAdminChatActions(thread);
+  }
+
+  function startChatPolling() {
+    stopChatPolling();
+    loadChatThreads()
+      .then(() => {
+        if (activeChatId) return openChatThread(activeChatId);
+      })
+      .catch((err) => toast(err.message));
+    chatPollTimer = setInterval(() => {
+      loadChatThreads()
+        .then(() => {
+          if (activeChatId) return openChatThread(activeChatId);
+        })
+        .catch(() => {});
+    }, 4000);
+  }
+
+  function stopChatPolling() {
+    if (chatPollTimer) {
+      clearInterval(chatPollTimer);
+      chatPollTimer = null;
+    }
+  }
+
+  function startChatBadgePoll() {
+    stopChatBadgePoll();
+    chatBadgeTimer = setInterval(() => {
+      loadChatThreads().catch(() => {});
+    }, 8000);
+  }
+
+  function stopChatBadgePoll() {
+    if (chatBadgeTimer) {
+      clearInterval(chatBadgeTimer);
+      chatBadgeTimer = null;
+    }
+  }
+
+  const refreshChatBtn = $('#refreshChatBtn');
+  if (refreshChatBtn) {
+    refreshChatBtn.addEventListener('click', () => {
+      loadChatThreads()
+        .then(() => {
+          if (activeChatId) return openChatThread(activeChatId);
+        })
+        .catch((err) => toast(err.message));
+    });
+  }
+
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-open-chat]');
+    if (!btn) return;
+    openChatThread(btn.dataset.openChat).catch((err) => toast(err.message));
   });
 
   checkAuth().catch(() => showLogin());

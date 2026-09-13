@@ -31,6 +31,7 @@
         <a href="#products" data-tab="products" class="active">ပစ္စည်းများ</a>
         <a href="#spin" data-tab="spin">စပင်ဘီး</a>
         <a href="#orders" data-tab="orders">အော်ဒါများ</a>
+        <a href="#chat" data-tab="chat">ကူညီရေး <span class="nav-unread hidden" id="chatNavBadge"></span></a>
         <a href="#settings" data-tab="settings">ဆက်တင်</a>
       </div>
       <div style="margin-top:1.5rem">
@@ -138,6 +139,23 @@
             </thead>
             <tbody></tbody>
           </table>
+        </div>
+      </section>
+
+      <!-- Customer chat -->
+      <section id="tab-chat" class="tab-panel hidden">
+        <div class="flex-between" style="margin-bottom:0.75rem">
+          <h1 style="margin:0">ကူညီရေး / Customer chat</h1>
+          <button type="button" class="btn btn-outline btn-sm" id="refreshChatBtn">ပြန်ဖတ်မည်</button>
+        </div>
+        <p class="hint" style="margin-top:0">အသစ်ဆုံး လှုပ်ရှားမှု အရင်ပြသည်။ ခရမ်းရောင်ဘေးလိုင်း = ဖောက်သည် စောင့်နေသည်။</p>
+        <div class="chat-admin">
+          <div class="chat-admin-list" id="chatThreadList">
+            <div class="empty hint">ချတ် မရှိသေးပါ</div>
+          </div>
+          <div class="chat-admin-pane" id="chatThreadPane">
+            <div class="empty">ဘယ်ဘက်မှ ချတ် ရွေးပါ</div>
+          </div>
         </div>
       </section>
 

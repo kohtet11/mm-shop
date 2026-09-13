@@ -145,6 +145,28 @@ function createTables(database) {
       FOREIGN KEY (order_id) REFERENCES orders(order_id),
       FOREIGN KEY (prize_id) REFERENCES spin_prizes(id)
     );
+
+    CREATE TABLE IF NOT EXISTS chat_threads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_name TEXT NOT NULL,
+      customer_phone TEXT NOT NULL,
+      order_id TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      status TEXT DEFAULT 'open'
+    );
+
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      thread_id INTEGER NOT NULL,
+      sender TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (thread_id) REFERENCES chat_threads(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_chat_threads_phone ON chat_threads(customer_phone);
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_thread ON chat_messages(thread_id);
   `);
 }
 
@@ -743,6 +765,67 @@ function normalizePhone(phone) {
   return String(phone || '').replace(/[\s\-]/g, '');
 }
 
+function findChatThreadByPhone(phone) {
+  const p = normalizePhone(phone);
+  if (!p) return null;
+  const exact = db.prepare('SELECT * FROM chat_threads WHERE customer_phone = ?').get(p);
+  if (exact) return exact;
+  const all = db.prepare('SELECT * FROM chat_threads').all();
+  return all.find((t) => normalizePhone(t.customer_phone) === p) || null;
+}
+
+function getChatThreadById(id) {
+  const tid = parseInt(id, 10);
+  if (!Number.isFinite(tid)) return null;
+  return db.prepare('SELECT * FROM chat_threads WHERE id = ?').get(tid) || null;
+}
+
+function phoneMatchesThread(thread, phone) {
+  return !!(thread && normalizePhone(thread.customer_phone) === normalizePhone(phone));
+}
+
+function clampChatBody(body) {
+  const s = String(body || '').trim();
+  if (!s) return '';
+  return s.slice(0, 2000);
+}
+
+function formatChatThread(row, extras) {
+  return Object.assign(
+    {
+      id: row.id,
+      customer_name: row.customer_name,
+      customer_phone: row.customer_phone,
+      order_id: row.order_id || null,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      status: row.status || 'open',
+    },
+    extras || {}
+  );
+}
+
+function formatChatMessage(row) {
+  return {
+    id: row.id,
+    thread_id: row.thread_id,
+    sender: row.sender,
+    body: row.body,
+    created_at: row.created_at,
+  };
+}
+
+function listChatMessages(threadId) {
+  return db
+    .prepare(
+      `SELECT id, thread_id, sender, body, created_at
+       FROM chat_messages WHERE thread_id = ? ORDER BY id ASC`
+    )
+    .all(threadId)
+    .map(formatChatMessage);
+}
+
+
 function trackOrderHandler(req, res) {
   try {
     const orderId = String(
@@ -790,6 +873,95 @@ function trackOrderHandler(req, res) {
 
 app.get('/api/orders/track', trackOrderHandler);
 app.post('/api/orders/track', trackOrderHandler);
+
+// ========== PUBLIC CUSTOMER CHAT ==========
+
+app.post('/api/chat/threads', (req, res) => {
+  try {
+    const body = req.body || {};
+    const name = String(body.customer_name || body.name || '').trim();
+    const phone = normalizePhone(body.customer_phone || body.phone || '');
+    const rawOrder = body.order_id !== undefined ? body.order_id : body.orderId;
+    const orderId = rawOrder === undefined || rawOrder === null ? undefined : String(rawOrder).trim() || null;
+
+    if (!name || !phone) {
+      return res.status(400).json({ error: 'အမည်နှင့် ဖုန်းနံပါတ် လိုအပ်သည်' });
+    }
+    if (name.length > 80) {
+      return res.status(400).json({ error: 'အမည် တိုတောင်းရမည်' });
+    }
+    if (phone.length < 6 || phone.length > 20) {
+      return res.status(400).json({ error: 'ဖုန်းနံပါတ် မှားနေသည်' });
+    }
+
+    let thread = findChatThreadByPhone(phone);
+    if (thread) {
+      const nextOrder = orderId !== undefined ? orderId : thread.order_id;
+      db.prepare(
+        `UPDATE chat_threads
+         SET customer_name = ?, customer_phone = ?, order_id = ?, updated_at = datetime('now')
+         WHERE id = ?`
+      ).run(name, phone, nextOrder, thread.id);
+      thread = getChatThreadById(thread.id);
+    } else {
+      const result = db
+        .prepare(
+          `INSERT INTO chat_threads (customer_name, customer_phone, order_id, status)
+           VALUES (?, ?, ?, 'open')`
+        )
+        .run(name, phone, orderId === undefined ? null : orderId);
+      thread = getChatThreadById(result.lastInsertRowid);
+    }
+    res.json(formatChatThread(thread));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/chat/threads/:id/messages', (req, res) => {
+  try {
+    const thread = getChatThreadById(req.params.id);
+    if (!thread) return res.status(404).json({ error: 'ချတ် မတွေ့ပါ' });
+    const phone = req.query.phone || '';
+    if (!phoneMatchesThread(thread, phone)) {
+      return res.status(403).json({ error: 'ဖုန်းနံပါတ် မကိုက်ညီပါ' });
+    }
+    res.json({
+      thread: formatChatThread(thread),
+      messages: listChatMessages(thread.id),
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/chat/threads/:id/messages', (req, res) => {
+  try {
+    const thread = getChatThreadById(req.params.id);
+    if (!thread) return res.status(404).json({ error: 'ချတ် မတွေ့ပါ' });
+    const body = req.body || {};
+    if (!phoneMatchesThread(thread, body.phone || '')) {
+      return res.status(403).json({ error: 'ဖုန်းနံပါတ် မကိုက်ညီပါ' });
+    }
+    const text = clampChatBody(body.body);
+    if (!text) return res.status(400).json({ error: 'မက်ဆေ့ချ် ရိုက်ထည့်ပါ' });
+
+    const result = db
+      .prepare(`INSERT INTO chat_messages (thread_id, sender, body) VALUES (?, 'customer', ?)`)
+      .run(thread.id, text);
+    db.prepare(
+      `UPDATE chat_threads SET updated_at = datetime('now'), status = 'open' WHERE id = ?`
+    ).run(thread.id);
+    const msg = db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(result.lastInsertRowid);
+    res.json(formatChatMessage(msg));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 
 
 // ========== PUBLIC SPIN WHEEL ==========
@@ -1436,6 +1608,101 @@ app.delete('/api/admin/spin-prizes/:id', requireAdmin, (req, res) => {
     if (!existing) return res.status(404).json({ error: 'Not found' });
     db.prepare('DELETE FROM spin_prizes WHERE id = ?').run(id);
     res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
+// ========== ADMIN CUSTOMER CHAT ==========
+
+app.get('/api/admin/chat/threads', requireAdmin, (_req, res) => {
+  try {
+    const threads = db
+      .prepare(
+        `SELECT t.*,
+           (SELECT body FROM chat_messages WHERE thread_id = t.id ORDER BY id DESC LIMIT 1) AS last_body,
+           (SELECT sender FROM chat_messages WHERE thread_id = t.id ORDER BY id DESC LIMIT 1) AS last_sender,
+           (SELECT COUNT(*) FROM chat_messages WHERE thread_id = t.id) AS message_count
+         FROM chat_threads t
+         ORDER BY datetime(t.updated_at) DESC, t.id DESC`
+      )
+      .all();
+    res.json(
+      threads.map((t) =>
+        formatChatThread(t, {
+          last_body: t.last_body || '',
+          last_sender: t.last_sender || null,
+          message_count: Number(t.message_count) || 0,
+          needs_reply: t.last_sender === 'customer' && (t.status || 'open') === 'open',
+        })
+      )
+    );
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/admin/chat/threads/:id/messages', requireAdmin, (req, res) => {
+  try {
+    const thread = getChatThreadById(req.params.id);
+    if (!thread) return res.status(404).json({ error: 'ချတ် မတွေ့ပါ' });
+    res.json({
+      thread: formatChatThread(thread),
+      messages: listChatMessages(thread.id),
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/admin/chat/threads/:id/messages', requireAdmin, (req, res) => {
+  try {
+    const thread = getChatThreadById(req.params.id);
+    if (!thread) return res.status(404).json({ error: 'ချတ် မတွေ့ပါ' });
+    const body = req.body || {};
+    const text = clampChatBody(body.body);
+    const close = body.close === true || body.status === 'closed';
+    if (!text && !close) {
+      return res.status(400).json({ error: 'မက်ဆေ့ချ် ရိုက်ထည့်ပါ' });
+    }
+    let msg = null;
+    if (text) {
+      const result = db
+        .prepare(`INSERT INTO chat_messages (thread_id, sender, body) VALUES (?, 'admin', ?)`)
+        .run(thread.id, text);
+      msg = db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(result.lastInsertRowid);
+    }
+    const newStatus = close ? 'closed' : 'open';
+    db.prepare(
+      `UPDATE chat_threads SET updated_at = datetime('now'), status = ? WHERE id = ?`
+    ).run(newStatus, thread.id);
+    const updated = getChatThreadById(thread.id);
+    res.json({
+      thread: formatChatThread(updated),
+      message: msg ? formatChatMessage(msg) : null,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.patch('/api/admin/chat/threads/:id', requireAdmin, (req, res) => {
+  try {
+    const thread = getChatThreadById(req.params.id);
+    if (!thread) return res.status(404).json({ error: 'ချတ် မတွေ့ပါ' });
+    const status = req.body && req.body.status;
+    if (status !== 'open' && status !== 'closed') {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+    db.prepare(
+      `UPDATE chat_threads SET status = ?, updated_at = datetime('now') WHERE id = ?`
+    ).run(status, thread.id);
+    res.json(formatChatThread(getChatThreadById(thread.id)));
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Server error' });

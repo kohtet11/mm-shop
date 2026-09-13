@@ -41,6 +41,7 @@ cp .env.example .env
 3. **အော်ဒါများ** — အသစ်ဆုံး အရင်ပြသည်၊ စလစ်ကြည့်၊ အခြေအနေ ပြောင်းပါ  
    (`pending` → `paid_confirmed` → `shipped` / `cancelled`)
 4. **ငွေပေးချေမှု** — ဘဏ်အမည်၊ အကောင့်နံပါတ်၊ အကောင့်အမည် ပြင်ပါ (checkout တွင် ပြမည်)
+5. **ကူညီရေး / Customer chat** — ဖောက်သည် မက်ဆေ့ချ်များ ကြည့်၊ ပြန်စာ၊ ချတ် ပိတ်/ဖွင့်
 
 ## ဖောက်သည် အသုံးပြုပုံ
 
@@ -48,6 +49,7 @@ cp .env.example .env
 2. ဘဏ်သို့ လွှဲငွေလုပ်ပါ (ညွှန်ကြားချက် checkout တွင် ရှိသည်)
 3. အမည်၊ ဖုန်း၊ လိပ်စာ ဖြည့်ပြီး **ငွေလွှဲစလစ်ပုံ** တင်ကာ အော်ဒါတင်ပါ
 4. အော်ဒါနံပါတ် အတည်ပြုချက် ရရှိမည်
+5. ညာအောက် **ကူညီရန်** ခလုတ်ဖြင့် စတိုးသို့ မေးမြန်းနိုင်သည် (အမည် + ဖုန်း တစ်ကြိမ်သာ)
 
 
 ## စပင်ဘီး (၁၅ကြိမ် စက်ဝန်း)
@@ -57,6 +59,13 @@ cp .env.example .env
 - **အော်ဒါတစ်ခုချင်း** ၁၅ကြိမ် စက်ဝန်း — ၁၅၊ ၃၀၊ ၄၅… ကြိမ်မြောက်သည် admin မှ special မှတ်ထားသော ဆုများမှသာ ရွေးသည်
 - အခြားကြိမ်များသည် ပုံမှန်ဆုများမှသာ (pool အတွင်း uniform random; `hit_every` ကို ဤမုဒ်တွင် မသုံး)
 - Admin → စပင်ဘီး → 「၁၅ကြိမ်တွင် ၁ကြိမ်」 နှိပ်၍ special ဖွင့်/ပိတ်
+
+## ဖောက်သည် ချတ် (polling MVP)
+
+- စတိုး (`/` နှင့် `/track`) ညာအောက်တွင် Glow Gear အနက်/ခရမ်း ချတ်ခလုတ်
+- အမည် + ဖုန်းကို localStorage တွင် သိမ်းသည်။ အော်ဒါနံပါတ် ရွေးချယ်နိုင်
+- ချတ်ဖွင့်ထားစဉ် ~3.5s တိုင်း မက်ဆေ့ချ် အသစ် ဆွဲသည် (WebSocket မသုံး)
+- တစ်ဖုန်းလျှင် ချတ်တစ်ကြောင်း — Admin → **ကူညီရေး** တွင် ပြန်စာ / ပိတ်နိုင်သည်
 
 ## ဖိုင်ဖွဲ့စည်းပုံ
 
@@ -78,7 +87,8 @@ sync Blueprint or manually set Starter + disk mount `/var/data` + `DATA_ROOT=/va
 ## API အကျဉ်း
 
 **Public:** `GET /api/products`, `GET /api/settings/payment`, `POST /api/orders`  
-**Admin (session cookie):** products CRUD, orders list/detail/status, settings
+**Chat (public):** `POST /api/chat/threads`, `GET|POST /api/chat/threads/:id/messages` (`?phone=` / `{ phone, body }`)  
+**Admin (session cookie):** products CRUD, orders list/detail/status, settings, chat threads/replies
 
 ## မှတ်ချက်
 
