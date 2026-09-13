@@ -221,10 +221,11 @@ function migrateProductsColumns(database) {
 }
 
 const BUILTIN_CATEGORIES = [
-  { slug: 'blind_box', name: 'Blind box', sort_order: 10 },
-  { slug: 'accessories', name: 'Accessories', sort_order: 20 },
-  { slug: 'spin_game', name: 'Game', sort_order: 30 },
-  { slug: 'other', name: 'Other', sort_order: 40 },
+  { slug: 'blind_box', name: 'Blind box', sort_order: 10, active: 1 },
+  { slug: 'accessories', name: 'Accessories', sort_order: 20, active: 1 },
+  { slug: 'spin_game', name: 'Game', sort_order: 30, active: 1 },
+  // Placeholder only — hidden from product picker & public chips
+  { slug: 'other', name: 'Other', sort_order: 40, active: 0 },
 ];
 const PROTECTED_CATEGORY_SLUGS = new Set(['blind_box', 'spin_game']);
 const KNOWN_FALLBACK_SLUGS = new Set(BUILTIN_CATEGORIES.map((c) => c.slug));
@@ -256,13 +257,16 @@ function ensureUniqueCategorySlug(database, baseSlug, excludeId) {
 function seedCategories(database) {
   const find = database.prepare('SELECT id FROM categories WHERE slug = ?');
   const insert = database.prepare(
-    `INSERT INTO categories (slug, name, active, sort_order) VALUES (?, ?, 1, ?)`
+    `INSERT INTO categories (slug, name, active, sort_order) VALUES (?, ?, ?, ?)`
   );
   for (const cat of BUILTIN_CATEGORIES) {
     if (!find.get(cat.slug)) {
-      insert.run(cat.slug, cat.name, cat.sort_order);
+      const active = cat.active === undefined || cat.active === null ? 1 : Number(cat.active) ? 1 : 0;
+      insert.run(cat.slug, cat.name, active, cat.sort_order);
     }
   }
+  // Hide legacy placeholder from product picker / storefront chips
+  database.prepare(`UPDATE categories SET active = 0 WHERE slug = 'other' AND active != 0`).run();
 }
 
 function categorySlugExists(database, slug) {
@@ -270,7 +274,7 @@ function categorySlugExists(database, slug) {
   return !!database.prepare('SELECT 1 FROM categories WHERE slug = ?').get(slug);
 }
 
-function normalizeProductCategory(value, fallback = 'other') {
+function normalizeProductCategory(value, fallback = 'blind_box') {
   const s = slugifyCategory(value);
   if (!s) return fallback;
   try {
@@ -284,7 +288,7 @@ function categoryForProduct(input, isSpinCredit) {
   const spin = !!Number(isSpinCredit);
   const raw = input === undefined || input === null ? '' : String(input).trim();
   if (spin && !raw) return 'spin_game';
-  const cat = normalizeProductCategory(raw, spin ? 'spin_game' : 'other');
+  const cat = normalizeProductCategory(raw, spin ? 'spin_game' : 'blind_box');
   if (spin && cat === 'other') return 'spin_game';
   return cat;
 }
@@ -1060,7 +1064,7 @@ app.get('/api/categories', (_req, res) => {
     .prepare(
       `SELECT id, slug, name, active, sort_order, created_at
        FROM categories
-       WHERE active = 1
+       WHERE active = 1 AND slug != 'other'
        ORDER BY sort_order ASC, id ASC`
     )
     .all();

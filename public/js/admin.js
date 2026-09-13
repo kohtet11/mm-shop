@@ -129,25 +129,31 @@
     const sel = $('#pCategory');
     if (!sel) return;
     const cats = loadCategories._cache || [];
-    const want = selected || sel.value || 'blind_box';
-    const list = cats.length
-      ? cats
-      : [
-          { slug: 'blind_box', name: 'Blind box' },
-          { slug: 'accessories', name: 'Accessories' },
-          { slug: 'spin_game', name: 'Game' },
-          { slug: 'other', name: 'Other' },
-        ];
+    let want = selected || sel.value || 'blind_box';
+    if (want === 'other') want = 'blind_box';
+    const fallback = [
+      { slug: 'blind_box', name: 'Blind box', active: 1 },
+      { slug: 'accessories', name: 'Accessories', active: 1 },
+      { slug: 'spin_game', name: 'Game', active: 1 },
+    ];
+    const source = cats.length ? cats : fallback;
+    // Product picker: active categories only; never show placeholder "other"
+    const list = source.filter((c) => {
+      if (!c || c.slug === 'other') return false;
+      if (Number(c.active) === 0 && c.slug !== want) return false;
+      return true;
+    });
     sel.innerHTML = list
       .map(
         (c) =>
           `<option value="${escapeHtml(c.slug)}">${escapeHtml(c.name || c.slug)}</option>`
       )
       .join('');
-    if (want && ![...sel.options].some((o) => o.value === want)) {
+    if (want && want !== 'other' && ![...sel.options].some((o) => o.value === want)) {
+      const found = source.find((c) => c.slug === want);
       const opt = document.createElement('option');
       opt.value = want;
-      opt.textContent = want;
+      opt.textContent = (found && found.name) || want;
       sel.appendChild(opt);
     }
     sel.value = want;
@@ -239,6 +245,66 @@
         }
         $('#categoryModal').classList.remove('open');
         await loadCategories();
+      } catch (err) {
+        toast(err.message || 'မအောင်မြင်ပါ');
+      }
+    });
+  }
+
+  function openQuickCategoryModal() {
+    const modal = $('#quickCategoryModal');
+    const input = $('#quickCatName');
+    if (!modal || !input) return;
+    input.value = '';
+    modal.classList.add('open');
+    setTimeout(() => input.focus(), 30);
+  }
+
+  function closeQuickCategoryModal() {
+    const modal = $('#quickCategoryModal');
+    if (modal) modal.classList.remove('open');
+  }
+
+  const pCategoryAddBtn = $('#pCategoryAddBtn');
+  if (pCategoryAddBtn) {
+    pCategoryAddBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      openQuickCategoryModal();
+    });
+  }
+  const closeQuickCategoryModalBtn = $('#closeQuickCategoryModal');
+  if (closeQuickCategoryModalBtn) {
+    closeQuickCategoryModalBtn.addEventListener('click', closeQuickCategoryModal);
+  }
+  const cancelQuickCategoryModal = $('#cancelQuickCategoryModal');
+  if (cancelQuickCategoryModal) {
+    cancelQuickCategoryModal.addEventListener('click', closeQuickCategoryModal);
+  }
+  const quickCategoryModal = $('#quickCategoryModal');
+  if (quickCategoryModal) {
+    quickCategoryModal.addEventListener('click', (e) => {
+      if (e.target === quickCategoryModal) closeQuickCategoryModal();
+    });
+  }
+  const quickCategoryForm = $('#quickCategoryForm');
+  if (quickCategoryForm) {
+    quickCategoryForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = ($('#quickCatName') && $('#quickCatName').value.trim()) || '';
+      if (!name) {
+        toast('အမည် ထည့်ပါ');
+        return;
+      }
+      try {
+        const created = await api('/api/admin/categories', {
+          method: 'POST',
+          body: JSON.stringify({ name, active: 1 }),
+        });
+        closeQuickCategoryModal();
+        toast('အမျိုးအစား ထည့်ပြီး');
+        await loadCategories();
+        const slug = created && created.slug ? created.slug : '';
+        if (slug) fillProductCategorySelect(slug);
       } catch (err) {
         toast(err.message || 'မအောင်မြင်ပါ');
       }
@@ -439,7 +505,7 @@
     fd.append('price_mmk', $('#pPrice').value);
     fd.append('stock', $('#pStock') ? $('#pStock').value : '99');
     fd.append('is_spin_credit', $('#pSpinCredit') && $('#pSpinCredit').checked ? '1' : '0');
-    fd.append('category', $('#pCategory') ? $('#pCategory').value : 'other');
+    fd.append('category', $('#pCategory') ? $('#pCategory').value : 'blind_box');
     fd.append('authenticity', $('#pAuthCopy') && $('#pAuthCopy').checked ? 'copy' : 'authentic');
     fd.append('description', $('#pDesc').value);
     fd.append('active', $('#pActive').checked ? '1' : '0');

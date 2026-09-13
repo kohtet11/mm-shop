@@ -1384,3 +1384,24 @@ a.cart-btn {
   opacity: 0.65;
   cursor: not-allowed;
 }
+
+
+/* Product form: category select + quick-add */
+.category-select-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.45rem;
+}
+.category-select-row select {
+  flex: 1;
+  min-width: 0;
+}
+.category-add-btn {
+  flex: 0 0 auto;
+  min-width: 2.5rem;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+  font-size: 1.25rem;
+  line-height: 1;
+  font-weight: 600;
+}
