@@ -1176,7 +1176,6 @@ app.post('/api/orders', (req, res) => {
         const created = db.transaction(() => {
           total = 0;
           lineItems = [];
-          let allSpinCredit = true;
           for (const [pid, qty] of qtyByProduct.entries()) {
             const product = db
               .prepare(
@@ -1195,7 +1194,6 @@ app.post('/api/orders', (req, res) => {
               err.status = 400;
               throw err;
             }
-            if (!isSpinCredit) allSpinCredit = false;
             const available = Number.isFinite(Number(product.stock)) ? Number(product.stock) : 0;
             if (available < qty) {
               const err = new Error(
@@ -1224,11 +1222,8 @@ app.post('/api/orders', (req, res) => {
             });
           }
 
-          if (allSpinCredit) {
-            if (!addressVal || isSpinAddressPlaceholder(addressVal)) {
-              addressVal = SPIN_ADDRESS_PLACEHOLDER;
-            }
-          } else if (!addressVal || isSpinAddressPlaceholder(addressVal)) {
+          // Spin-credit carts also need a real delivery address for shipping won prizes.
+          if (!addressVal || isSpinAddressPlaceholder(addressVal)) {
             const err = new Error('အမည်၊ ဖုန်းနှင့် လိပ်စာ လိုအပ်သည်');
             err.status = 400;
             throw err;
@@ -1568,8 +1563,9 @@ app.post('/api/spin/purchase', (req, res) => {
       if (!Number.isFinite(qty) || qty < 1) qty = 1;
       qty = Math.min(99, qty);
 
-      if (!nameVal || !phoneVal) {
-        return res.status(400).json({ error: 'အမည်နှင့် ဖုန်း လိုအပ်သည်' });
+      const addressVal = String(req.body.address || '').trim();
+      if (!nameVal || !phoneVal || !addressVal || isSpinAddressPlaceholder(addressVal)) {
+        return res.status(400).json({ error: 'အမည်၊ ဖုန်းနှင့် လိပ်စာ လိုအပ်သည်' });
       }
       if (!req.file) {
         return res.status(400).json({ error: 'ငွေလွှဲစလစ် ပုံတင်ရန် လိုအပ်သည်' });
@@ -1583,7 +1579,6 @@ app.post('/api/spin/purchase', (req, res) => {
       const orderId =
         'MM' + Date.now().toString(36).toUpperCase() + uuidv4().slice(0, 4).toUpperCase();
       const slipPath = `slips/${req.file.filename}`;
-      const addressVal = SPIN_ADDRESS_PLACEHOLDER;
 
       try {
         const created = db.transaction(() => {
@@ -1673,7 +1668,8 @@ function isBlankField(value) {
 }
 
 function orderHasFullContact(order) {
-  // Spin-credit orders may store address as "—"; name + phone are enough to unlock/spin.
+  // New purchases require a real address; legacy spin orders may still have "—".
+  // Unlock remains order-id based — name + phone (+ any address incl. placeholder) suffice.
   return (
     !!order &&
     !isBlankField(order.customer_name) &&

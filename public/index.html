@@ -108,6 +108,11 @@
             <input id="spinBuyPhone" name="phone" required autocomplete="tel" placeholder="09xxxxxxxxx" />
           </div>
           <div class="form-group">
+            <label for="spinBuyAddress">လိပ်စာ *</label>
+            <textarea id="spinBuyAddress" name="address" required rows="3" autocomplete="street-address"></textarea>
+            <div class="hint">ဆုပစ္စည်း ပို့ဆောင်ရန်</div>
+          </div>
+          <div class="form-group">
             <label for="spinBuyQty">ကံစမ်းခွင့် အရေအတွက်</label>
             <input id="spinBuyQty" name="qty" type="number" min="1" max="99" value="1" />
             <div class="hint">ပုံမှန် ၁ ကြိမ် — စျေးနှုန်းအတိုင်း တိုးပေးနိုင်သည်</div>
@@ -210,7 +215,7 @@
           <div class="form-group" id="addressGroup">
             <label for="address">ပို့ဆောင်ရမည့် လိပ်စာ <span id="addressRequiredMark">*</span></label>
             <textarea id="address" name="address" required></textarea>
-            <div class="hint hidden" id="spinCheckoutHint">စပင်ဘီး ကံစမ်းခွင့် အော်ဒါ — လိပ်စာ မလိုအပ်ပါ (အမည်၊ ဖုန်း၊ စလစ်သာ)</div>
+            <div class="hint hidden" id="spinCheckoutHint">ဆုပစ္စည်း ပို့ဆောင်ရန် — ကံစမ်းခွင့် အော်ဒါတွင်လည်း လိပ်စာ လိုအပ်သည်</div>
           </div>
           <div class="form-group">
             <label for="notes">မှတ်ချက် (ရွေးချယ်နိုင်)</label>

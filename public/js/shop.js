@@ -675,17 +675,13 @@
     const mark = $('#addressRequiredMark');
     const hint = $('#spinCheckoutHint');
     if (addr) {
-      addr.required = !spinOnly;
-      if (spinOnly) addr.removeAttribute('required');
-      else addr.setAttribute('required', 'required');
+      addr.required = true;
+      addr.setAttribute('required', 'required');
     }
-    if (mark) mark.classList.toggle('hidden', spinOnly);
+    if (mark) mark.classList.remove('hidden');
+    // Spin-credit carts: show shipping hint; address still required for prize delivery
     if (hint) hint.classList.toggle('hidden', !spinOnly);
-    if (group) group.classList.toggle('spin-optional', spinOnly);
-    const label = group && group.querySelector('label');
-    if (label && mark) {
-      // keep label text; required mark handles *
-    }
+    if (group) group.classList.remove('spin-optional');
   }
 
   function renderCart() {
@@ -875,21 +871,13 @@
 
     const nameVal = $('#customerName').value.trim();
     const phoneVal = $('#phone').value.trim();
-    const spinOnly = cartIsSpinOnly();
-    let addressVal = $('#address').value.trim();
-    if (!nameVal || !phoneVal) {
-      toast('အမည်နှင့် ဖုန်း လိုအပ်သည်');
-      btn.disabled = false;
-      btn.textContent = 'အော်ဒါ အတည်ပြုမည်';
-      return;
-    }
-    if (!spinOnly && !addressVal) {
+    const addressVal = $('#address').value.trim();
+    if (!nameVal || !phoneVal || !addressVal) {
       toast('အမည်၊ ဖုန်းနှင့် လိပ်စာ လိုအပ်သည်');
       btn.disabled = false;
       btn.textContent = 'အော်ဒါ အတည်ပြုမည်';
       return;
     }
-    if (spinOnly && !addressVal) addressVal = '—';
     const fd = new FormData();
     fd.append('customer_name', nameVal);
     fd.append('phone', phoneVal);
@@ -1392,13 +1380,14 @@
       const btn = $('#spinPurchaseSubmitBtn');
       const nameVal = ($('#spinBuyName') && $('#spinBuyName').value.trim()) || '';
       const phoneVal = ($('#spinBuyPhone') && $('#spinBuyPhone').value.trim()) || '';
+      const addressVal = ($('#spinBuyAddress') && $('#spinBuyAddress').value.trim()) || '';
       let qty = $('#spinBuyQty') ? parseInt($('#spinBuyQty').value, 10) : 1;
       if (!Number.isFinite(qty) || qty < 1) qty = 1;
       qty = Math.min(99, qty);
       const slipInput = $('#spinBuySlip');
       const slip = slipInput && slipInput.files && slipInput.files[0];
-      if (!nameVal || !phoneVal) {
-        toast('အမည်နှင့် ဖုန်း လိုအပ်သည်');
+      if (!nameVal || !phoneVal || !addressVal) {
+        toast('အမည်၊ ဖုန်းနှင့် လိပ်စာ လိုအပ်သည်');
         return;
       }
       if (!slip) {
@@ -1412,6 +1401,7 @@
       const fd = new FormData();
       fd.append('name', nameVal);
       fd.append('phone', phoneVal);
+      fd.append('address', addressVal);
       fd.append('qty', String(qty));
       fd.append('slip', slip);
       try {
