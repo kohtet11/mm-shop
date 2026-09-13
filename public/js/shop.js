@@ -298,7 +298,7 @@
     stopPromoTimer();
     promoTimer = setInterval(() => {
       showPromoSlide(promoIndex + 1);
-    }, 4500);
+    }, 5000);
   }
 
   function stopPromoTimer() {
