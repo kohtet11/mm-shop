@@ -37,6 +37,10 @@
           <h2>စပင်ဘီး လှည့်ရန်</h2>
           <p class="hint">「စပင်ဘီး ကံစမ်းခွင့်」 ဝယ် → ငွေလွှဲ + စလစ်တင် → Admin က ကံစမ်းခွင့် ထည့်ပေး → အော်ဒါနံပါတ် ထည့်ပြီး ကံစမ်းမည်</p>
         </div>
+        <div class="spin-buy-row" id="spinBuyRow" hidden>
+          <button type="button" class="btn btn-pink" id="spinBuyBtn">ဝယ်ယူမည်</button>
+          <p class="hint" id="spinBuyPriceHint"></p>
+        </div>
         <div class="spin-unlock" id="spinUnlockBox">
           <div class="spin-unlock-row">
             <div class="form-group" style="flex:1;min-width:12rem">
@@ -80,6 +84,65 @@
     </section>
   </main>
 
+
+
+  <!-- Spin chance purchase modal -->
+  <div class="overlay" id="spinPurchaseOverlay" role="dialog" aria-modal="true" aria-labelledby="spinPurchaseTitle">
+    <div class="panel">
+      <div class="panel-header">
+        <h2 id="spinPurchaseTitle">ကံစမ်းခွင့် ဝယ်ယူမည်</h2>
+        <button type="button" class="close-x" data-close="spinPurchaseOverlay" aria-label="ပိတ်ရန်">×</button>
+      </div>
+
+      <div id="spinPurchaseFormView">
+        <div class="pay-box" id="spinPayInstructions">
+          <div>ငွေလွှဲညွှန်ကြားချက် ဖတ်နေသည်…</div>
+        </div>
+        <p class="hint" id="spinPurchaseProductHint" style="margin:0.75rem 0 0.25rem"></p>
+
+        <form id="spinPurchaseForm">
+          <div class="form-group">
+            <label for="spinBuyName">အမည် *</label>
+            <input id="spinBuyName" name="name" required autocomplete="name" />
+          </div>
+          <div class="form-group">
+            <label for="spinBuyPhone">ဖုန်းနံပါတ် *</label>
+            <input id="spinBuyPhone" name="phone" required autocomplete="tel" placeholder="09xxxxxxxxx" />
+          </div>
+          <div class="form-group">
+            <label for="spinBuyQty">ကံစမ်းခွင့် အရေအတွက်</label>
+            <input id="spinBuyQty" name="qty" type="number" min="1" max="99" value="1" />
+            <div class="hint">ပုံမှန် ၁ ကြိမ် — စျေးနှုန်းအတိုင်း တိုးပေးနိုင်သည်</div>
+          </div>
+          <div class="form-group">
+            <label for="spinBuySlip">ငွေလွှဲစလစ် ပုံ *</label>
+            <input id="spinBuySlip" name="slip" type="file" accept="image/*" required />
+            <div class="hint">ဘဏ်သို့ လွှဲပြီး စလစ်ပုံတင်မှ အော်ဒါတင်နိုင်သည်</div>
+          </div>
+          <div class="cart-total">
+            <span>ပေးရမည့်ငွေ</span>
+            <span id="spinPurchaseTotal">0 ကျပ်</span>
+          </div>
+          <button type="submit" class="btn btn-primary" id="spinPurchaseSubmitBtn" style="width:100%">
+            ဝယ်ယူမည် အတည်ပြု
+          </button>
+        </form>
+      </div>
+
+      <div id="spinPurchaseSuccess" class="success-box hidden">
+        <div style="font-size:2.5rem">✅</div>
+        <h2>အော်ဒါ အောင်မြင်ပါသည်!</h2>
+        <p>သင့်အော်ဒါနံပါတ် (ကံစမ်းခွင့် ဖွင့်ရန် သုံးပါ)</p>
+        <div class="order-id" id="spinPurchaseOrderId"></div>
+        <p class="hint">Admin က ကံစမ်းခွင့် ထည့်ပေးပြီးနောက် အောက်က အော်ဒါနံပါတ်ဖြင့် စစ်ပါ။</p>
+        <div style="display:flex;flex-direction:column;gap:0.5rem;margin-top:0.75rem">
+          <button type="button" class="btn btn-pink" id="spinPurchaseUseOrderBtn">ဤနံပါတ်ဖြင့် ကံစမ်းခွင့် စစ်မည်</button>
+          <a class="btn btn-outline" id="spinPurchaseTrackLink" href="/track" style="text-align:center">အော်ဒါအခြေအနေ စစ်ရန်</a>
+          <button type="button" class="btn btn-primary" id="spinPurchaseDoneBtn">ပိတ်မည်</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Spin result modal -->
   <div class="overlay" id="spinResultOverlay" role="dialog" aria-modal="true">

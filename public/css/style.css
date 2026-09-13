@@ -876,6 +876,31 @@ a.cart-btn {
   margin: 1.25rem 0 0.5rem;
 }
 .spin-section[hidden] { display: none !important; }
+
+.spin-buy-row {
+  margin: 0.75rem auto 0.25rem;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+.spin-buy-row[hidden] { display: none !important; }
+.spin-buy-row .btn-pink {
+  min-width: 180px;
+  font-weight: 700;
+  box-shadow: 0 0 18px rgba(236, 72, 153, 0.4);
+}
+.spin-buy-row #spinBuyPriceHint {
+  margin: 0;
+  color: #e9d5ff;
+}
+#spinPurchaseOverlay .pay-box { text-align: left; }
+#spinPurchaseOverlay .mmqr-img {
+  max-width: 220px;
+  margin-top: 0.5rem;
+  border-radius: 12px;
+}
 .spin-card {
   background: linear-gradient(145deg, #1a0b2e 0%, #2e1065 45%, #0f172a 100%);
   border: 1px solid rgba(168, 85, 247, 0.45);

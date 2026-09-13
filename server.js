@@ -498,6 +498,7 @@ const BUILTIN_SAMPLES = [
     on_banner: 0,
     discount_percent: 0,
     stock: 99,
+    active: 0,
     is_spin_credit: 1,
     category: 'spin_game',
   },
@@ -529,7 +530,10 @@ function seedBuiltins(database) {
   const findProductByName = database.prepare('SELECT * FROM products WHERE name = ?');
   const insertProduct = database.prepare(
     `INSERT INTO products (name, price_mmk, description, image_path, active, on_banner, discount_percent, stock, is_spin_credit, category, authenticity)
-     VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  const updateProductActive = database.prepare(
+    `UPDATE products SET active = ?, updated_at = datetime('now') WHERE id = ?`
   );
   const updateProductImage = database.prepare(
     `UPDATE products SET image_path = ?, updated_at = datetime('now') WHERE id = ?`
@@ -562,11 +566,13 @@ function seedBuiltins(database) {
   for (const sample of BUILTIN_SAMPLES) {
     let row = findProductByName.get(sample.name);
     if (!row) {
+      const wantActive = sample.active === 0 ? 0 : 1;
       const result = insertProduct.run(
         sample.name,
         sample.price,
         sample.desc,
         sample.image_path,
+        wantActive,
         sample.on_banner,
         sample.discount_percent,
         sample.stock != null ? sample.stock : 99,
@@ -577,6 +583,7 @@ function seedBuiltins(database) {
       row = {
         id: result.lastInsertRowid,
         image_path: sample.image_path,
+        active: wantActive,
         is_spin_credit: sample.is_spin_credit ? 1 : 0,
         category: categoryForProduct(sample.category, sample.is_spin_credit),
       };
@@ -589,6 +596,11 @@ function seedBuiltins(database) {
     if (Number(row.is_spin_credit || 0) !== wantSpinCredit && sample.is_spin_credit) {
       updateSpinCreditFlag.run(wantSpinCredit, row.id);
       row.is_spin_credit = wantSpinCredit;
+    }
+    // Keep seeded buy-spin off the public grid (active=0) while purchase API still finds it.
+    if (sample.is_spin_credit && sample.active === 0 && Number(row.active) !== 0) {
+      updateProductActive.run(0, row.id);
+      row.active = 0;
     }
     const wantCat = categoryForProduct(sample.category, wantSpinCredit);
     const currentCat = String(row.category || '').trim();
@@ -905,6 +917,22 @@ function getSettingsMap(database) {
   return map;
 }
 
+
+/** Buy-spin catalog row (may be inactive so it stays off the storefront grid). */
+function findSpinCreditProduct(database) {
+  return (
+    database
+      .prepare(
+        `SELECT id, name, price_mmk, stock, active, is_spin_credit
+         FROM products
+         WHERE COALESCE(is_spin_credit, 0) = 1
+         ORDER BY id ASC
+         LIMIT 1`
+      )
+      .get() || null
+  );
+}
+
 function orderHasSpinCreditItems(database, orderId) {
   const rows = database
     .prepare(
@@ -957,7 +985,9 @@ app.get('/api/products', (_req, res) => {
   const products = db
     .prepare(
       `SELECT id, name, price_mmk, description, image_path, active, on_banner, discount_percent, stock, is_spin_credit, category, authenticity
-       FROM products WHERE active = 1 ORDER BY id DESC`
+       FROM products
+       WHERE active = 1 AND COALESCE(is_spin_credit, 0) = 0
+       ORDER BY id DESC`
     )
     .all();
   res.json(products);
@@ -1031,12 +1061,19 @@ app.post('/api/orders', (req, res) => {
                 'SELECT id, name, price_mmk, active, stock, is_spin_credit FROM products WHERE id = ?'
               )
               .get(pid);
-            if (!product || !product.active) {
+            if (!product) {
               const err = new Error(`ပစ္စည်း မရရှိနိုင်ပါ (id=${pid})`);
               err.status = 400;
               throw err;
             }
-            if (!Number(product.is_spin_credit)) allSpinCredit = false;
+            const isSpinCredit = !!Number(product.is_spin_credit);
+            // Spin-credit buy item may be catalog-hidden (active=0) but still purchasable.
+            if (!product.active && !isSpinCredit) {
+              const err = new Error(`ပစ္စည်း မရရှိနိုင်ပါ (id=${pid})`);
+              err.status = 400;
+              throw err;
+            }
+            if (!isSpinCredit) allSpinCredit = false;
             const available = Number.isFinite(Number(product.stock)) ? Number(product.stock) : 0;
             if (available < qty) {
               const err = new Error(
@@ -1377,6 +1414,114 @@ function formatSpinPrizeAdmin(row) {
     product_name: row.product_name || null,
   };
 }
+
+
+app.get('/api/spin/product', (_req, res) => {
+  try {
+    const product = findSpinCreditProduct(db);
+    if (!product) {
+      return res.status(404).json({ error: 'ကံစမ်းခွင့် ပစ္စည်း မရှိသေးပါ' });
+    }
+    res.json({
+      id: product.id,
+      name: product.name,
+      price_mmk: product.price_mmk,
+      stock: Number.isFinite(Number(product.stock)) ? Number(product.stock) : 0,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/spin/purchase', (req, res) => {
+  uploadSlip.single('slip')(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({ error: err.message || 'Upload failed' });
+    }
+    try {
+      const nameVal = String(req.body.name || req.body.customer_name || '').trim();
+      const phoneVal = String(req.body.phone || '').trim();
+      let qty = parseInt(req.body.qty != null ? req.body.qty : req.body.quantity, 10);
+      if (!Number.isFinite(qty) || qty < 1) qty = 1;
+      qty = Math.min(99, qty);
+
+      if (!nameVal || !phoneVal) {
+        return res.status(400).json({ error: 'အမည်နှင့် ဖုန်း လိုအပ်သည်' });
+      }
+      if (!req.file) {
+        return res.status(400).json({ error: 'ငွေလွှဲစလစ် ပုံတင်ရန် လိုအပ်သည်' });
+      }
+
+      const product = findSpinCreditProduct(db);
+      if (!product) {
+        return res.status(400).json({ error: 'ကံစမ်းခွင့် ပစ္စည်း မရရှိနိုင်ပါ' });
+      }
+
+      const orderId =
+        'MM' + Date.now().toString(36).toUpperCase() + uuidv4().slice(0, 4).toUpperCase();
+      const slipPath = `slips/${req.file.filename}`;
+      const addressVal = SPIN_ADDRESS_PLACEHOLDER;
+
+      try {
+        const created = db.transaction(() => {
+          const fresh = db
+            .prepare(
+              'SELECT id, name, price_mmk, active, stock, is_spin_credit FROM products WHERE id = ?'
+            )
+            .get(product.id);
+          if (!fresh || !Number(fresh.is_spin_credit)) {
+            const e = new Error('ကံစမ်းခွင့် ပစ္စည်း မရရှိနိုင်ပါ');
+            e.status = 400;
+            throw e;
+          }
+          const available = Number.isFinite(Number(fresh.stock)) ? Number(fresh.stock) : 0;
+          if (available < qty) {
+            const e = new Error(`${fresh.name} စတော့ မလောက်ပါ (ကျန် ${available})`);
+            e.status = 400;
+            throw e;
+          }
+          const dec = db
+            .prepare(
+              `UPDATE products SET stock = stock - ?, updated_at = datetime('now')
+               WHERE id = ? AND stock >= ?`
+            )
+            .run(qty, fresh.id, qty);
+          if (!dec.changes) {
+            const e = new Error(`${fresh.name} စတော့ မလောက်ပါ`);
+            e.status = 400;
+            throw e;
+          }
+          const total = fresh.price_mmk * qty;
+          db.prepare(
+            `INSERT INTO orders (order_id, customer_name, phone, address, notes, total_mmk, status, slip_path)
+             VALUES (?, ?, ?, ?, '', ?, 'pending', ?)`
+          ).run(orderId, nameVal, phoneVal, addressVal, total, slipPath);
+          db.prepare(
+            `INSERT INTO order_items (order_id, product_id, product_name, unit_price_mmk, quantity)
+             VALUES (?, ?, ?, ?, ?)`
+          ).run(orderId, fresh.id, fresh.name, fresh.price_mmk, qty);
+          return { orderId, total_mmk: total, quantity: qty };
+        })();
+        res.json({
+          ok: true,
+          orderId: created.orderId,
+          order_id: created.orderId,
+          total_mmk: created.total_mmk,
+          quantity: created.quantity,
+        });
+      } catch (e) {
+        if (e && e.status === 400) {
+          return res.status(400).json({ error: e.message });
+        }
+        throw e;
+      }
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: 'Server error' });
+    }
+  });
+});
 
 app.get('/api/spin/prizes', (_req, res) => {
   try {

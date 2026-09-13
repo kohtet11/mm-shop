@@ -18,6 +18,7 @@
   let spinLocked = false;
   let spinCompleted = false;
   let spinUnlockedOrderId = '';
+  let spinBuyProduct = null;
   const SPIN_COLORS = [
     '#7c3aed', '#a855f7', '#c026d3', '#db2777',
     '#6366f1', '#8b5cf6', '#ec4899', '#4f46e5',
@@ -272,7 +273,10 @@
 
   async function fetchProducts() {
     const res = await fetch('/api/products');
-    products = await res.json();
+    const list = await res.json();
+    products = Array.isArray(list)
+      ? list.filter((p) => !Number(p && p.is_spin_credit))
+      : [];
     renderPromoCarousel();
     renderProducts();
   }
@@ -623,15 +627,15 @@
     $('#checkoutTotal').textContent = formatMMK(cartTotal());
   }
 
-  function renderPayment() {
-    if (!payment) return;
+  function paymentInstructionsHtml() {
+    if (!payment) return '<div>ငွေလွှဲညွှန်ကြားချက် ဖတ်နေသည်…</div>';
     const mmqr = payment.mmqr_url
       ? `<div class="mmqr-box">
           <div><strong>MMQR ဖြင့် ငွေလွှဲရန်</strong></div>
           <img class="mmqr-img" src="${escapeHtml(payment.mmqr_url)}" alt="MMQR" />
         </div>`
       : '';
-    $('#payInstructions').innerHTML = `
+    return `
       <div><strong>ဘဏ်လွှဲငွေ ညွှန်ကြားချက်</strong></div>
       <div>ဘဏ်အမည် — ${escapeHtml(payment.bank_name || '-')}</div>
       <div>အကောင့်နံပါတ် — <strong>${escapeHtml(payment.account_number || '-')}</strong></div>
@@ -639,6 +643,14 @@
       <div class="hint" style="margin-top:0.4rem">${escapeHtml(payment.payment_note || '')}</div>
       ${mmqr}
     `;
+  }
+
+  function renderPayment() {
+    const html = paymentInstructionsHtml();
+    const a = $('#payInstructions');
+    if (a) a.innerHTML = html;
+    const b = $('#spinPayInstructions');
+    if (b) b.innerHTML = html;
   }
 
   function openOverlay(id) {
@@ -860,15 +872,62 @@
     }
   }
 
+  function getSpinBuyUnitPrice() {
+    return spinBuyProduct ? Number(spinBuyProduct.price_mmk) || 0 : 0;
+  }
+
+  function updateSpinPurchaseTotal() {
+    const qtyEl = $('#spinBuyQty');
+    let qty = qtyEl ? parseInt(qtyEl.value, 10) : 1;
+    if (!Number.isFinite(qty) || qty < 1) qty = 1;
+    qty = Math.min(99, qty);
+    const totalEl = $('#spinPurchaseTotal');
+    if (totalEl) totalEl.textContent = formatMMK(getSpinBuyUnitPrice() * qty);
+  }
+
+  function syncSpinBuyRow() {
+    const row = $('#spinBuyRow');
+    const hint = $('#spinBuyPriceHint');
+    if (!row) return;
+    if (!spinBuyProduct) {
+      row.hidden = true;
+      return;
+    }
+    row.hidden = false;
+    if (hint) {
+      hint.textContent =
+        (spinBuyProduct.name || 'ကံစမ်းခွင့်') +
+        ' — ' +
+        formatMMK(spinBuyProduct.price_mmk) +
+        ' / ကြိမ်';
+    }
+  }
+
+  async function fetchSpinBuyProduct() {
+    try {
+      const res = await fetch('/api/spin/product');
+      if (!res.ok) {
+        spinBuyProduct = null;
+      } else {
+        spinBuyProduct = await res.json();
+      }
+    } catch (_) {
+      spinBuyProduct = null;
+    }
+    renderSpinSection();
+  }
+
   function renderSpinSection() {
     const section = $('#spinSection');
     if (!section) return;
-    if (!spinPrizes.length) {
+    const show = !!(spinPrizes.length || spinBuyProduct);
+    if (!show) {
       section.hidden = true;
       return;
     }
     section.hidden = false;
-    drawSpinWheel(spinRotation);
+    syncSpinBuyRow();
+    if (spinPrizes.length) drawSpinWheel(spinRotation);
     updateSpinButton();
   }
 
@@ -1188,8 +1247,126 @@
     });
   }
 
+  function openSpinPurchase() {
+    if (!spinBuyProduct) {
+      toast('ကံစမ်းခွင့် ပစ္စည်း မရရှိနိုင်ပါ');
+      return;
+    }
+    const formView = $('#spinPurchaseFormView');
+    const success = $('#spinPurchaseSuccess');
+    if (formView) formView.classList.remove('hidden');
+    if (success) success.classList.add('hidden');
+    const form = $('#spinPurchaseForm');
+    if (form) form.reset();
+    const qty = $('#spinBuyQty');
+    if (qty) qty.value = '1';
+    const hint = $('#spinPurchaseProductHint');
+    if (hint) {
+      hint.textContent =
+        (spinBuyProduct.name || '') + ' — ' + formatMMK(spinBuyProduct.price_mmk) + ' / ကြိမ်';
+    }
+    renderPayment();
+    updateSpinPurchaseTotal();
+    openOverlay('spinPurchaseOverlay');
+  }
+
+  const spinBuyBtn = $('#spinBuyBtn');
+  if (spinBuyBtn) spinBuyBtn.addEventListener('click', openSpinPurchase);
+
+  const spinBuyQty = $('#spinBuyQty');
+  if (spinBuyQty) {
+    spinBuyQty.addEventListener('input', updateSpinPurchaseTotal);
+    spinBuyQty.addEventListener('change', updateSpinPurchaseTotal);
+  }
+
+  const spinPurchaseForm = $('#spinPurchaseForm');
+  if (spinPurchaseForm) {
+    spinPurchaseForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = $('#spinPurchaseSubmitBtn');
+      const nameVal = ($('#spinBuyName') && $('#spinBuyName').value.trim()) || '';
+      const phoneVal = ($('#spinBuyPhone') && $('#spinBuyPhone').value.trim()) || '';
+      let qty = $('#spinBuyQty') ? parseInt($('#spinBuyQty').value, 10) : 1;
+      if (!Number.isFinite(qty) || qty < 1) qty = 1;
+      qty = Math.min(99, qty);
+      const slipInput = $('#spinBuySlip');
+      const slip = slipInput && slipInput.files && slipInput.files[0];
+      if (!nameVal || !phoneVal) {
+        toast('အမည်နှင့် ဖုန်း လိုအပ်သည်');
+        return;
+      }
+      if (!slip) {
+        toast('ငွေလွှဲစလစ် ပုံတင်ပါ');
+        return;
+      }
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'တင်နေသည်…';
+      }
+      const fd = new FormData();
+      fd.append('name', nameVal);
+      fd.append('phone', phoneVal);
+      fd.append('qty', String(qty));
+      fd.append('slip', slip);
+      try {
+        const res = await fetch('/api/spin/purchase', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'မအောင်မြင်ပါ');
+        const orderId = data.orderId || data.order_id;
+        rememberOrder(orderId, phoneVal);
+        const oidEl = $('#spinPurchaseOrderId');
+        if (oidEl) oidEl.textContent = orderId;
+        const trackLink = $('#spinPurchaseTrackLink');
+        if (trackLink) {
+          trackLink.href =
+            '/track?id=' +
+            encodeURIComponent(orderId) +
+            '&phone=' +
+            encodeURIComponent(phoneVal);
+        }
+        const formView = $('#spinPurchaseFormView');
+        const success = $('#spinPurchaseSuccess');
+        if (formView) formView.classList.add('hidden');
+        if (success) success.classList.remove('hidden');
+        const unlockOid = $('#spinOrderId');
+        if (unlockOid) unlockOid.value = orderId;
+        fetchSpinBuyProduct();
+      } catch (err) {
+        toast(err.message || 'အမှားဖြစ်နေသည်');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'ဝယ်ယူမည် အတည်ပြု';
+        }
+      }
+    });
+  }
+
+  const spinPurchaseDoneBtn = $('#spinPurchaseDoneBtn');
+  if (spinPurchaseDoneBtn) {
+    spinPurchaseDoneBtn.addEventListener('click', () => closeOverlay('spinPurchaseOverlay'));
+  }
+
+  const spinPurchaseUseOrderBtn = $('#spinPurchaseUseOrderBtn');
+  if (spinPurchaseUseOrderBtn) {
+    spinPurchaseUseOrderBtn.addEventListener('click', async () => {
+      const oid = ($('#spinPurchaseOrderId') && $('#spinPurchaseOrderId').textContent.trim()) || '';
+      closeOverlay('spinPurchaseOverlay');
+      const unlockOid = $('#spinOrderId');
+      if (unlockOid && oid) unlockOid.value = oid;
+      const section = $('#spinSection');
+      if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (oid) await unlockSpin(false);
+    });
+  }
+
+  document.addEventListener('click', (e) => {
+    if (e.target === $('#spinPurchaseOverlay')) closeOverlay('spinPurchaseOverlay');
+  });
+
   updateCartCount();
   fetchProducts();
   fetchPayment();
   fetchSpinPrizes();
+  fetchSpinBuyProduct();
 })();
